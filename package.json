@@ -7,6 +7,7 @@
     "dev": "concurrently -k -n web,api -c cyan,green \"vite\" \"tsx watch server/index.ts\"",
     "dev:web": "vite",
     "dev:api": "tsx watch server/index.ts",
+    "telegram:read": "node scripts/telegram-public-reader.mjs",
     "build": "tsc -p tsconfig.server.json --noEmit && tsc -b && vite build",
     "lint": "oxlint",
     "check": "tsx server/check-connectors.ts && tsx server/check-recommend.ts",

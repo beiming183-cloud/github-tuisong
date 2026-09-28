@@ -127,7 +127,7 @@ OpenRadar Personal 不是一个 GitHub 热榜，也不是新闻聚合站。
 - [x] 候选池 `server/candidates.ts`：canonical URL 归一化 + 同批与跨批去重。
 - [x] `GET /api/candidates` 查看候选池状态；`/api/sources` 附带连接器自检结果。
 - [x] 卡片由候选反向渲染（`candidateToTool`），不再直接依赖原始 API 响应。
-- [x] `npm run check` 自检：16 项 canonicalUrl / 去重 / 卡片往返用例。
+- [x] `npm run check` 自检：候选池 19 项 + 评分 44 项离线用例。
 - [x] Git 仓库与远端 `git@github.com:beiming183-cloud/github-tuisong.git`。
 - [x] 修复 Vite 只监听 `::1`、导致 `http://127.0.0.1:5173/` 打不开且 OAuth 回调失败的问题。
 - [x] 行为事件记录 `server/events.ts`：view / like / save / star / compare / similar / skip / dismiss，写入 `data/events.json`（原子写 + 0o600）。
@@ -375,8 +375,8 @@ npm run smoke -- http://127.0.0.1:8799
 最近一次（行为事件与可解释评分落地后）在本机实测：
 
 - `npm run build`：通过。
-- `npm run lint`：通过（0 warning / 0 error，21 个文件）。
-- `npm run check`：候选池 18 项 + 评分 44 项，全部通过。
+- `npm run lint`：通过（0 warning / 0 error，22 个文件）。
+- `npm run check`：候选池 19 项 + 评分 44 项，全部通过（合计 63 项）。
 - `npm run smoke`：24 项通过、1 项 SKIP（池里只有一个来源时来源多样性无法满足），连续跑两次结果一致。
 - `/api/health`：`{"ok":true,"service":"openradar-api"}`。
 - `/api/sources`：返回 7 条来源描述，并附带 `connectors` 自检结果（`github-discovery: ready`）。
