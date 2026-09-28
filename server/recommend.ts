@@ -45,11 +45,24 @@ export const SOURCE_TRUST: Record<string, number> = {
 
 const DEFAULT_TRUST = 0.5
 
+/**
+ * 来源 → 解释用法的映射。
+ * 必须与 SOURCE_TRUST 一一对应：可信度是排序用的数字，解释是给用户看的话，
+ * 两者混用会让「通用探索」被说成「从你感兴趣的项目延伸出来的」。
+ */
+const TRUST_REASON_CODES: Record<string, string> = {
+  manual: 'trust:self-curated',
+  'github-stars': 'trust:self-curated',
+  'github-similar': 'trust:related',
+  'github-discovery': 'trust:discovery',
+}
+
 /** 干扰惩罚：跳过和「不再推荐」降权，但不永久隐藏（手册 13.3）。 */
 export const SKIP_PENALTY = 0.5
 export const DISMISS_PENALTY = 0.1
 
-export type WeightedEntry = { label: string; weight: number; count: number }
+/** 画像里的一项：标签/来源名，以及它累加出来的权重。 */
+export type WeightedEntry = { label: string; weight: number }
 
 export type InterestProfile = {
   tagWeights: Record<string, number>
@@ -116,7 +129,7 @@ export function buildInterestProfile(events: UserEvent[]): InterestProfile {
 
 function toTopEntries(weights: Record<string, number>, limit: number): WeightedEntry[] {
   return Object.entries(weights)
-    .map(([label, weight]) => ({ label, weight, count: weight }))
+    .map(([label, weight]) => ({ label, weight }))
     .sort((a, b) => b.weight - a.weight)
     .slice(0, limit)
 }
@@ -259,7 +272,10 @@ export function scoreCandidate(entry: PooledCandidate, profile: InterestProfile,
   else if (value <= 0.4) reasonCodes.push('value:obscure')
   if (explore >= 1) reasonCodes.push('explore:broaden')
   else if (explore <= 0.1) reasonCodes.push('explore:known-area')
-  reasonCodes.push(trust >= 0.9 ? 'trust:self-curated' : trust >= 0.7 ? 'trust:related' : 'trust:discovery')
+  // 来源的解释必须按 sourceId 精确对应，不能用可信度数值分档。
+  // 曾经用 trust >= 0.7 兜底，结果 github-discovery（0.7）和 github-similar（0.75）
+  // 落到同一档，通用探索被说成「从你感兴趣的项目延伸出来的」——凭空编造了关系。
+  reasonCodes.push(TRUST_REASON_CODES[candidate.sourceId] ?? 'trust:discovery')
 
   const parts: ScorePart[] = (Object.keys(SCORE_WEIGHTS) as Array<keyof typeof SCORE_WEIGHTS>).map((key) => {
     const raw = { interest: interest.raw, value, novelty, activity, trust, explore }[key]
@@ -484,8 +500,8 @@ const REASON_CODE_TEXT: Record<string, string> = {
   'explore:broaden': '这是你还没接触过的方向。',
   'explore:known-area': '这是你已经熟悉的领域。',
   'trust:self-curated': '这是你自己收藏过或主动找来的。',
-  'trust:related': '这是从你感兴趣的项目延伸出来的。',
-  'trust:discovery': '这来自通用探索。',
+  'trust:related': '这是你从一个感兴趣的项目继续找出来的。',
+  'trust:discovery': '这来自通用探索，不是根据你的收藏推出来的。',
   'penalty:skipped': '你之前跳过过它，所以排在后面。',
   'penalty:dismissed': '你标记过不想看类似的，所以放在很后面，但不会消失。',
 }

@@ -14,6 +14,7 @@ import {
   SCORE_WEIGHTS,
   buildInterestProfile,
   diversify,
+  explainReasonCodes,
   hasProfile,
   rankCandidates,
   scoreCandidate,
@@ -114,6 +115,17 @@ const curated = scoreCandidate(makeCandidate({ sourceId: 'manual' }), profile, n
 const discovery = scoreCandidate(makeCandidate({ sourceId: 'github-discovery' }), profile, now)
 checkTrue('自己丢进来的链接，来源可信度更高',
   curated.parts.find((part) => part.key === 'trust')!.raw > discovery.parts.find((part) => part.key === 'trust')!.raw)
+
+// 回归：来源解释必须按 sourceId 精确对应，不能按可信度数值分档。
+// 曾经用 trust >= 0.7 兜底，导致通用探索被说成「从你感兴趣的项目延伸出来的」。
+check('通用探索的来源标记为 trust:discovery',
+  discovery.reasonCodes.includes('trust:discovery'), true)
+check('通用探索的解释不声称与用户兴趣有关',
+  explainReasonCodes(discovery.reasonCodes).includes('这来自通用探索，不是根据你的收藏推出来的。'), true)
+check('相似项目搜索的来源标记为 trust:related',
+  scoreCandidate(makeCandidate({ sourceId: 'github-similar' }), profile, now).reasonCodes.includes('trust:related'), true)
+check('自己收藏的来源标记为 trust:self-curated',
+  scoreCandidate(makeCandidate({ sourceId: 'github-stars' }), profile, now).reasonCodes.includes('trust:self-curated'), true)
 
 const viewed = scoreCandidate(makeCandidate({ sourceItemId: 'github-1' }), profile, now)
 const unviewed = scoreCandidate(makeCandidate({ sourceItemId: 'github-2' }), profile, now)
