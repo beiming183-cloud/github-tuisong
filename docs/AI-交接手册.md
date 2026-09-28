@@ -1,10 +1,10 @@
 # OpenRadar Personal 多 AI 协同开发交接手册
 
-> 文档版本：V0.1
+> 文档版本：V0.2
 >
 > 编写时间：2026-09-28
 >
-> 当前项目状态：V0.3 前端原型 + GitHub 接入 + DeepSeek 可选接入 + Telegram QR 登录骨架
+> 当前项目状态：V0.4 前端原型 + GitHub 接入 + 统一候选池与连接器骨架 + DeepSeek 可选接入 + Telegram QR 登录骨架
 >
 > 项目目录：`D:\Codex\Projects\openradar-personal`
 >
@@ -122,16 +122,25 @@ OpenRadar Personal 不是一个 GitHub 热榜，也不是新闻聚合站。
 - [x] Telegram 个人账号 QR 登录基础骨架。
 - [x] Telegram 会话本地加密保存和断开连接接口。
 - [x] 移动端样式、焦点状态和基本键盘可访问性。
+- [x] 统一候选 `Candidate` 与来源连接器接口 `SourceConnector`。
+- [x] GitHub 连接器 `server/connectors/github.ts`；探索路由改为调用连接器，不再直接写抓取逻辑。
+- [x] 候选池 `server/candidates.ts`：canonical URL 归一化 + 同批与跨批去重。
+- [x] `GET /api/candidates` 查看候选池状态；`/api/sources` 附带连接器自检结果。
+- [x] 卡片由候选反向渲染（`candidateToTool`），不再直接依赖原始 API 响应。
+- [x] `npm run check` 自检：16 项 canonicalUrl / 去重 / 卡片往返用例。
+- [x] Git 仓库与远端 `git@github.com:beiming183-cloud/github-tuisong.git`。
 - [x] `npm run build` 通过。
 - [x] `npm run lint` 通过。
 
 ### 3.2 已有但不完整
 
 - [ ] `interestTags` 当前是静态标签，不是真正的行为画像。
-- [ ] 推荐排序仍然主要依赖初始顺序和来源返回顺序。
+- [ ] 推荐排序仍然主要依赖初始顺序和来源返回顺序；候选池已有数据，但还没有参与排序。
+- [ ] 候选池只在内存里，API 进程重启即清空，尚未写入 SQLite。
+- [ ] 去重目前是 URL 级，还没有做标题、描述、标签的语义合并。
 - [ ] GitHub 的分类目前是关键词启发式，不是成熟的相关度模型。
 - [ ] DeepSeek 只负责补中文卡片字段，没有缓存、成本统计、版本化和人工纠错。
-- [ ] `rss` 在来源登记表中标记为 ready，但实际 RSS 抓取接口尚未实现，应在真正接入前重新调整状态。
+- [x] `rss` 曾在来源登记表中虚标为 ready，已改为 coming_soon 并写明“目前还没有抓取代码”。
 - [ ] Telegram 可以生成登录二维码的代码，但当前没有配置 Telegram API ID/API Hash，也没有频道消息抓取。
 - [ ] 推荐流没有真正的数据库，刷新或换浏览器后行为画像不会跨设备同步。
 - [ ] 暂无定时任务、后台抓取队列或自动推送。
@@ -140,9 +149,8 @@ OpenRadar Personal 不是一个 GitHub 热榜，也不是新闻聚合站。
 
 - [ ] Telegram 频道/资源群配置页面。
 - [ ] Telegram 公开频道消息读取、链接抽取、去重和卡片生成。
-- [ ] RSS、Hacker News、Product Hunt 等来源连接器。
-- [ ] 通用来源连接器接口。
-- [ ] 内容规范化和跨来源去重。
+- [ ] RSS、Hacker News、Product Hunt 等来源连接器（接口已就绪，见第 12 节）。
+- [ ] 内容规范化（标题、描述、标签的语义合并），现在只做了 URL 级去重。
 - [ ] 无限滚动或分页式“继续刷”。
 - [ ] 真实的喜欢/收藏/跳过事件记录和推荐重排。
 - [ ] SQLite 或其他轻量持久化存储。
@@ -175,6 +183,8 @@ openradar-personal/
 ├── .env                         # 本地私密配置，不提交
 ├── .env.example                 # 环境变量模板
 ├── .gitignore                   # 保护密钥、会话和构建目录
+├── .gitattributes               # 统一 LF 行尾，二进制文件不做文本转换
+├── .oxlintrc.json               # oxlint 规则配置
 ├── index.html
 ├── package.json
 ├── package-lock.json
@@ -197,10 +207,16 @@ openradar-personal/
 │       ├── ResearchDialogs.tsx  # 详情和横向比较
 │       └── TelegramDialog.tsx   # Telegram 配置与二维码登录
 ├── server/
-│   ├── index.ts                 # Express 服务、GitHub 路由、会话
+│   ├── index.ts                 # Express 服务、路由、会话；抓取逻辑已外移
 │   ├── ai.ts                    # DeepSeek 配置和中文卡片补全
 │   ├── telegram.ts              # GramJS QR 登录和加密会话
-│   └── sources.ts               # 来源登记表
+│   ├── sources.ts               # 来源登记表（用户可见状态）
+│   ├── candidates.ts            # 候选池：canonicalUrl 归一化与跨来源去重
+│   ├── check-connectors.ts      # npm run check 的本地自检用例
+│   └── connectors/
+│       ├── types.ts             # Candidate / SourceConnector / ToolCard 接口
+│       ├── github.ts            # GitHub 连接器（第一个参考实现）
+│       └── index.ts             # 连接器注册表与自检汇总
 ├── data/                        # 运行时私密数据，不提交
 │   ├── session-secret
 │   ├── sessions.json
@@ -210,18 +226,33 @@ openradar-personal/
 └── dist/                        # 构建产物，不提交
 ```
 
-### 4.3 当前没有 Git 仓库
+### 4.3 Git 仓库与协作基线
 
-当前目录执行 `git status` 会提示不是 Git 仓库。后续如果开始多 AI 协同，建议先初始化 Git，并以小提交保存每一阶段：
+仓库已经建好。远端是 `git@github.com:beiming183-cloud/github-tuisong.git`，主分支 `main`，已配置 upstream。
 
 ```text
-第一步：建立初始快照
-第二步：每个子任务使用独立分支或至少独立提交
-第三步：主代理逐个审阅并合并
-第四步：每次合并后运行 build + lint
+本地仓库：D:\Codex\Projects\openradar-personal
+远端    ：git@github.com:beiming183-cloud/github-tuisong.git（SSH）
+分支    ：main（从初始快照 fc5fa76 开始）
+提交身份：beiming / beiming183@gmail.com
 ```
 
-在没有 Git 之前，不要让多个 AI 同时重写同一个大文件；尤其不要让多个代理同时修改 `src/App.tsx` 或 `server/index.ts`。
+已逐条验证的安全边界：
+
+- `.env`、`data/session-secret`、`data/sessions.json`、`data/telegram-session.json`、`node_modules`、`dist`、`.playwright-cli` 均被 `.gitignore` 忽略（用 `git check-ignore -v` 核对过）。
+- 初始提交做过内容级密钥扫描：把 `.env` 里的非空配置值逐个比对全部暂存文件，命中的只有 `127.0.0.1` 本地地址。**新增文件后要重复这件事**，不要只看文件名。
+- `.gitattributes` 锁定 `* text=auto eol=lf`，避免不同工具产生整文件换行差异。
+
+每个子任务的流程：
+
+```text
+第一步：git pull --ff-only，确认基线干净
+第二步：每个子任务使用独立分支或至少独立提交
+第三步：提交前运行 npm run build、npm run lint、npm run check
+第四步：主代理逐个审阅并合并
+```
+
+仍然不要让多个 AI 同时重写同一个大文件；尤其不要让两个代理同时修改 `src/App.tsx` 或 `server/index.ts`。
 
 ---
 
@@ -273,6 +304,8 @@ npm run lint
 
 `npm run build` 包含服务端 TypeScript 检查、客户端 TypeScript 构建和 Vite 生产构建。
 
+`npm run check` 运行 `server/check-connectors.ts` 的本地自检，覆盖 canonicalUrl 归一化、候选池同批与跨批去重、候选到卡片的往返渲染。它不联网、不读 `.env`、不接触密钥，改动连接器或去重逻辑后必须运行。
+
 ### 5.4 手动验证清单
 
 - [ ] 页面可以打开，没有白屏。
@@ -285,6 +318,8 @@ npm run lint
 - [ ] 输入 GitHub 链接能分析并加入推荐流。
 - [ ] GitHub 登录状态能正确显示；未登录时 Star 操作给出中文提示。
 - [ ] DeepSeek 没有 Key 时，页面仍能使用本地中文规则结果。
+- [ ] 探索成功后，提示里出现“其中 N 个是第一次看到”，是中文而不是技术错误原文。
+- [ ] 再点一次探索，提示里出现“N 个之前已经出现过”。
 - [ ] Telegram 未配置时，弹窗清楚说明下一步，不显示错误二维码。
 - [ ] 图片加载失败时有项目名称和图标后备。
 - [ ] 移动端宽度下按钮和比较台不溢出。
@@ -292,14 +327,20 @@ npm run lint
 
 ### 5.5 当前已知验证结果
 
-在本交接手册编写前：
+最近一次（统一候选池与连接器落地后）在本机实测：
 
 - `npm run build`：通过。
-- `npm run lint`：通过。
-- `/api/sources`：可以返回 GitHub、RSS、Hacker News、Product Hunt、Telegram、手动链接等来源描述。
-- `/api/discover/github`：可返回 GitHub 探索结果。
+- `npm run lint`：通过（0 warning / 0 error，18 个文件）。
+- `npm run check`：16 项用例全部通过。
+- `/api/health`：`{"ok":true,"service":"openradar-api"}`。
+- `/api/sources`：返回 7 条来源描述，并附带 `connectors` 自检结果（`github-discovery: ready`）。
+- `/api/candidates`：空池时返回 `{"stats":{"size":0,...},"items":[]}`。
+- `/api/discover/github`：返回 24 个项目，`pool.size=24, added=24, duplicates=0`；同参数再请求一次为 `added=0, duplicates=24`；换成 `q=stars:>20000` 为 `added=20, duplicates=4`。
+- 手动丢链接：`https://github.com/qarmin/czkawka/tree/master` 与 `https://www.github.com/Qarmin/Czkawka.git` 归一化为同一条候选，第二次为 `added=0, duplicates=1`。
 - Telegram 当前 `/api/telegram/config`：`configured: false`，因为尚未成功获得 API ID/API Hash。
 - DeepSeek 当前未配置 Key，规则结果可用。
+
+**尚未完成**：浏览器手动验证。本轮改动只做了接口级冒烟测试，还没有在浏览器里点过“探索”，下一位接手时请补上。
 
 ---
 
@@ -454,17 +495,38 @@ type Tool = {
 
 #### `GET /api/sources`
 
-返回 `sourceRegistry`，目前包括：
+返回 `{ sources, connectors }`。`sources` 是用户可见的来源登记表，`connectors` 是连接器自检结果，用来对账“登记为可用但实际没有代码”的情况。目前包括：
 
 | id | 来源 | 当前状态 | 说明 |
 |---|---|---|---|
 | `github-stars` | 我的 GitHub Star | ready | 已实现 |
 | `github-discovery` | GitHub 新项目 | ready | 已实现 |
-| `rss` | RSS / 网站 | ready（登记） | 实际抓取未实现，后续应调整 |
+| `rss` | RSS / 网站 | coming_soon | 接口已就绪但没有抓取代码，已从虚标的 ready 改正 |
 | `hacker-news` | Hacker News | coming_soon | 尚未实现 |
 | `product-hunt` | Product Hunt | needs_config | 需要 API 配置 |
 | `telegram` | 纸飞机频道 / 资源群 | needs_config | QR 连接骨架，频道抓取未实现 |
 | `manual` | 我丢一个链接 | ready | GitHub 链接已实现 |
+
+#### `GET /api/candidates?limit=<1-100>`
+
+查看候选池状态，只返回地址和计数，不返回任何凭证：
+
+```json
+{
+  "stats": { "size": 44, "bySource": { "github-discovery": 44 }, "multiSource": 0 },
+  "items": [
+    {
+      "canonicalUrl": "https://github.com/owner/repo",
+      "title": "repo",
+      "sourceKind": "github",
+      "sourceIds": ["github-discovery", "github-stars"],
+      "seenCount": 3,
+      "firstSeenAt": "2026-09-28T00:00:00.000Z",
+      "lastSeenAt": "2026-09-28T00:00:00.000Z"
+    }
+  ]
+}
+```
 
 ### 8.2 AI
 
@@ -563,10 +625,12 @@ id, title, summary, why, tags, fit, difficulty, value
 
 #### `GET /api/discover/github?q=<可选查询>`
 
+- 路由现在只负责鉴权、限流和把结果送进候选池；抓取逻辑在 `server/connectors/github.ts`。
 - 没有 `q` 时默认：`stars:>500 pushed:>180天前`。
 - 按 updated 排序，最多 24 个。
 - 过滤 archived 和 fork。
-- 当前探索页调用它并把结果加入 `tools`。
+- 返回 `{ source, query, tools, pool: { size, added, duplicates } }`。
+- 卡片由候选反向渲染（`candidateToTool`），不是直接使用原始 API 对象。这条是后续接入非 GitHub 来源的前提。
 
 #### `PUT /api/github/star/:owner/:repo`
 
@@ -822,62 +886,77 @@ type SourceMessage = {
 
 ---
 
-## 12. 来源连接器的未来统一接口
+## 12. 来源连接器的统一接口（已落地）
 
-当来源超过 GitHub 一个时，不要继续把路由逻辑堆到 `server/index.ts`。建议新建：
+GitHub 是第一个参考实现，接口已经真实存在于 `server/connectors/types.ts`，不再是“未来建议”。后续来源不要继续把逻辑堆到 `server/index.ts`，照着 `github.ts` 的形状写：
 
 ```text
 server/connectors/
-├── types.ts
-├── github.ts
-├── telegram.ts
-├── rss.ts
-├── hackerNews.ts
-└── productHunt.ts
+├── types.ts            # 已存在：Candidate / SourceConnector / ToolCard
+├── index.ts            # 已存在：连接器注册表与自检汇总
+├── github.ts           # 已存在：参考实现
+├── telegram.ts         # 待建
+├── rss.ts              # 待建
+├── hackerNews.ts       # 待建
+└── productHunt.ts      # 待建
 ```
 
-可以采用以下概念接口：
+实际接口：
 
 ```ts
-type Candidate = {
-  canonicalUrl: string
+export type Candidate = {
+  canonicalUrl: string          // 归一化后作为唯一去重键
+  sourceItemId?: string         // 来源内稳定 ID，例如 github-12345
   title?: string
   description?: string
-  sourceKind: Tool['sourceKind']
-  sourceId: string
+  sourceKind: SourceKind
+  sourceId: string              // 对应 server/sources.ts 里的来源 id
   sourceLabel: string
   sourcePublishedAt?: string
   rawText?: string
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>   // 来源专属字段，GitHub 的约定见 github.ts
 }
 
-interface SourceConnector {
+export interface SourceConnector {
   id: string
   label: string
+  kind: SourceKind
   checkConfig(): Promise<{ ready: boolean; message?: string }>
-  fetchCandidates(input: { cursor?: string; limit: number }): Promise<{
-    candidates: Candidate[]
-    nextCursor?: string
-  }>
+  fetchCandidates(input: {
+    cursor?: string
+    limit: number
+    query?: string
+    auth?: { token?: string }
+  }): Promise<{ candidates: Candidate[]; nextCursor?: string }>
 }
 ```
 
-推荐流水线：
+与最初设计稿的两处不同，都是有意为之：
+
+1. `fetchCandidates` 增加了 `auth`。连接器不读 Cookie、不读 `.env`，鉴权 Token 由 `server/index.ts` 从加密会话解析后注入。好处是连接器可以被自检脚本直接调用，不需要登录态。
+2. `Candidate` 增加了 `sourceItemId`。去重靠 `canonicalUrl`，但回查原始记录需要一个来源内的稳定 ID。
+
+**URL 归一化不由连接器负责**：连接器返回原始 `canonicalUrl`，由 `server/candidates.ts` 的 `canonicalizeUrl` 统一归一化。这样所有来源共享同一套去重规则，而不是各写一份。新增连接器时不要自己归一化 URL。
+
+推荐流水线（✅ 已实现，⬜ 未实现）：
 
 ```text
-来源连接器
-  → 原始候选 Candidate
-  → URL / 项目规范化
-  → 跨来源去重
-  → 基础元数据抓取
-  → 规则过滤
-  → AI 中文解释
-  → 兴趣匹配评分
-  → 多样性重排
-  → 推荐卡片
+✅ 来源连接器            server/connectors/*
+✅ 原始候选 Candidate     connector.fetchCandidates()
+✅ URL 规范化            server/candidates.ts: canonicalizeUrl
+✅ 跨来源去重            server/candidates.ts: upsertCandidates
+✅ 规则过滤              isUsableRepo（archived / fork）
+✅ 推荐卡片              connectors/github.ts: candidateToTool
+⬜ 基础元数据抓取        非 GitHub 来源的网页元数据
+⬜ AI 中文解释           现有 DeepSeek 补全还没有接进候选池
+⬜ 兴趣匹配评分          需要先有行为事件
+⬜ 多样性重排            需要先有评分
+⬜ 持久化                候选池现在在内存里，重启即清空
 ```
 
 注意：连接器只负责“找到东西”，不要在连接器里写 UI 文案和推荐排序。
+
+改动连接器或去重逻辑后必须运行 `npm run check`；`server/check-connectors.ts` 里已经有 canonicalUrl 和去重的回归用例，新增来源时请补用例。
 
 ---
 
@@ -1155,12 +1234,12 @@ dismiss    -4
 
 ### P0：先把推荐系统从“演示”变成“可持续使用”
 
-1. 建立 `Candidate` 和统一来源连接器接口。
-2. 把 GitHub 结果纳入候选池，而不是直接覆盖 `tools`。
-3. 增加 `view / like / save / skip / compare` 行为事件。
-4. 做第一版可解释的兴趣评分。
-5. 增加去重和推荐多样性。
-6. 让“继续刷”能够加载下一批结果。
+1. [x] 建立 `Candidate` 和统一来源连接器接口。（2026-09-28 完成）
+2. [x] 把 GitHub 结果纳入候选池，而不是直接覆盖 `tools`。（2026-09-28 完成，池在内存里）
+3. [ ] 增加 `view / like / save / skip / compare` 行为事件。
+4. [ ] 做第一版可解释的兴趣评分。
+5. [ ] 让候选池真正参与去重与推荐多样性（现在的去重只影响统计和提示，不影响排序）。
+6. [ ] 让“继续刷”能够加载下一批结果，并把候选池从内存换成 SQLite。
 
 ### P1：把信息源做成真正可扩展的系统
 
@@ -1269,10 +1348,10 @@ dismiss    -4
 接手本项目时，按以下顺序开始：
 
 1. 先读本文，不要立即重写页面。
-2. 检查 `D:\Codex\Projects\openradar-personal` 是否存在。
+2. 检查 `D:\Codex\Projects\openradar-personal` 是否存在，并 `git pull --ff-only` 确认基线干净。
 3. 运行 `npm install`（如果 `node_modules` 不存在）。
-4. 运行 `npm run build` 和 `npm run lint`，确认基线。
-5. 检查 `/api/health`、`/api/sources` 和 `/api/ai/config`。
+4. 运行 `npm run build`、`npm run lint` 和 `npm run check`，确认基线。
+5. 检查 `/api/health`、`/api/sources`、`/api/candidates` 和 `/api/ai/config`。
 6. 不读取或打印 `.env` 的真实值。
 7. 看清用户当前优先级：个人工具发现、中文、简单、视觉化、可持续推荐。
 8. 如果任务涉及新来源，先设计 Candidate 和去重字段，再写抓取代码。
@@ -1311,6 +1390,22 @@ DeepSeek 用来分析、改写、匹配和比较；被推荐的项目不需要�
 
 先把个人账号 QR 登录骨架接好；由于 Telegram 创建 API 应用页面出现外部 ERROR，暂缓真实连接和频道抓取，不用这个阻塞其他开发。
 
+### 2026-09-28：Git 协作基线
+
+建立 Git 仓库并推送到 `git@github.com:beiming183-cloud/github-tuisong.git`（主分支 `main`，初始快照 `fc5fa76`）。行尾统一为 LF，`.playwright-cli` 调试产物加入忽略。这条是后续多 AI 协同的前提：没有回滚点就不允许并行改动。
+
+### 2026-09-28：统一候选与连接器
+
+采用 `Candidate` + `SourceConnector` 作为所有来源的统一出入口，GitHub 作为第一个参考实现。路由不再直接写抓取逻辑，只做鉴权、限流和入池。连接器不读 Cookie、不读 `.env`，鉴权 Token 由 `server/index.ts` 注入。卡片改为从候选反向渲染，为接入非 GitHub 来源做准备。
+
+### 2026-09-28：候选池先做内存版
+
+候选池只放内存，重启即清空，但 `canonicalUrl` 归一化和去重语义按最终形态实现，避免以后换 SQLite 时改变行为。现在去重只影响 `pool.size / added / duplicates` 的统计和前端提示，**还没有参与推荐排序**——不假装它已经影响推荐。
+
+### 2026-09-28：来源状态不再虚标
+
+`rss` 曾登记为 `ready` 但没有任何抓取代码，属于对用户虚报能力，已改为 `coming_soon` 并在描述里写明“目前还没有抓取代码”。以后新增来源必须让 `/api/sources` 的 `connectors` 自检结果与登记状态一致。
+
 ---
 
 ## 21. 完成标准（Definition of Done）
@@ -1326,6 +1421,7 @@ DeepSeek 用来分析、改写、匹配和比较；被推荐的项目不需要�
 - [ ] 不会破坏已有 GitHub、详情、比较和本地收藏流程。
 - [ ] `npm run build` 通过。
 - [ ] `npm run lint` 通过。
+- [ ] `npm run check` 通过（涉及连接器、去重或卡片生成时必须）。
 - [ ] 至少完成一次浏览器手动验证。
 - [ ] 更新本手册的当前状态或决策记录。
 - [ ] 用中文向用户说明现在已完成什么、还需要什么。

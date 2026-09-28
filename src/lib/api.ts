@@ -34,7 +34,7 @@ export const api = {
     body: JSON.stringify({ url }),
   }),
   similar: (owner: string, repo: string) => request<{ source: string; tools: Tool[] }>(`/api/github/similar?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`),
-  discoverGitHub: (query = '') => request<{ source: string; query: string; tools: Tool[] }>(`/api/discover/github${query ? `?q=${encodeURIComponent(query)}` : ''}`),
+  discoverGitHub: (query = '') => request<{ source: string; query: string; tools: Tool[]; pool?: { size: number; added: number; duplicates: number } }>(`/api/discover/github${query ? `?q=${encodeURIComponent(query)}` : ''}`),
   enrich: (tools: Tool[]) => request<{ configured: boolean; model?: string; patches: Array<Pick<Tool, 'id' | 'title' | 'summary' | 'why' | 'tags' | 'fit' | 'difficulty' | 'value'>> }>('/api/ai/enrich', {
     method: 'POST',
     body: JSON.stringify({ tools }),

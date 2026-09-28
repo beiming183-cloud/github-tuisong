@@ -5,6 +5,19 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express, { type NextFunction, type Request, type Response } from 'express'
 import { deepSeekConfig, enrichTools, type AiToolInput } from './ai.js'
+import { listPool, poolStats, upsertCandidates } from './candidates.js'
+import {
+  candidateToTool,
+  githubDiscoveryConnector,
+  githubRequest,
+  isUsableRepo,
+  parseGitHubRepository,
+  repoToCandidate,
+  repoToTool,
+  type GitHubRepo,
+  type GitHubSearchResult,
+} from './connectors/github.js'
+import { connectorStatuses } from './connectors/index.js'
 import { sourceRegistry } from './sources.js'
 import { disconnectTelegram, startTelegramLogin, telegramLoginStatus, telegramStatus } from './telegram.js'
 
@@ -32,21 +45,6 @@ type Session = {
   refreshTokenExpiresAt?: number
   user: GitHubUser
   createdAt: number
-}
-
-type GitHubRepo = {
-  id: number
-  name: string
-  full_name: string
-  html_url: string
-  description: string | null
-  stargazers_count: number
-  language: string | null
-  topics?: string[]
-  pushed_at: string
-  owner: { login: string }
-  archived: boolean
-  fork: boolean
 }
 
 const sessions = new Map<string, Session>()
@@ -170,118 +168,30 @@ async function refreshSession(session: Session) {
   return session.accessToken
 }
 
+/**
+ * 把本地加密会话翻译成 GitHub Token，并处理 401 刷新。
+ * 真正的 HTTP 调用在 connectors/github.ts，会话逻辑不外泄到连接器。
+ */
 async function githubFetch<T>(endpoint: string, tokenOrSession?: string | Session, init?: RequestInit): Promise<T> {
   const session = typeof tokenOrSession === 'object' ? tokenOrSession : undefined
-  const token = session ? await refreshSessionIfNeeded(session) : tokenOrSession
-  const response = await fetch(`https://api.github.com${endpoint}`, {
-    ...init,
-    headers: {
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'OpenRadar-Personal',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...init?.headers,
-    },
-  })
+  const plainToken = typeof tokenOrSession === 'string' ? tokenOrSession : undefined
+  const token = session ? await refreshSessionIfNeeded(session) : plainToken
 
-  if (!response.ok && response.status === 401 && session?.refreshToken) {
-    const refreshedToken = await refreshSession(session)
-    return githubFetch<T>(endpoint, refreshedToken, init)
-  }
-
-  if (!response.ok) {
-    const detail = await response.text()
-    const error = new Error(`GitHub 请求失败（${response.status}）`) as Error & { status?: number; detail?: string }
-    error.status = response.status
-    error.detail = detail
+  try {
+    return await githubRequest<T>(endpoint, token, init)
+  } catch (error) {
+    const status = (error as { status?: number }).status
+    if (status === 401 && session?.refreshToken) {
+      const refreshedToken = await refreshSession(session)
+      return githubRequest<T>(endpoint, refreshedToken, init)
+    }
     throw error
   }
-
-  if (response.status === 204) return undefined as T
-  return response.json() as Promise<T>
 }
 
 async function refreshSessionIfNeeded(session: Session) {
   if (!session.accessTokenExpiresAt || session.accessTokenExpiresAt > Date.now() + 60_000) return session.accessToken
   return refreshSession(session)
-}
-
-function compactNumber(value: number) {
-  if (value >= 10_000) return `${(value / 10_000).toFixed(value >= 100_000 ? 0 : 1)} 万`
-  return value.toLocaleString('zh-CN')
-}
-
-function classifyRepo(repo: GitHubRepo) {
-  const haystack = [repo.name, repo.description ?? '', repo.language ?? '', ...(repo.topics ?? [])].join(' ').toLowerCase()
-  const mappings = [
-    { words: ['ai', 'llm', 'agent', 'gpt', 'machine-learning'], scene: 'AI 工具与自动化', tags: ['AI 工具', '自动化', '可二次开发'], title: '想把 AI 真正用起来？这个开源项目值得认识。', value: '改装价值高' },
-    { words: ['file', 'sync', 'transfer', 'backup', 'storage'], scene: '文件整理与传输', tags: ['文件工具', '效率工具', '日常实用'], title: '文件处理总有点麻烦？它可能把步骤变简单。', value: '日常价值高' },
-    { words: ['desktop', 'windows', 'macos', 'launcher'], scene: '桌面效率', tags: ['桌面工具', '效率工具', '能马上用'], title: '电脑上的小麻烦，也许可以交给这个工具。', value: '上手价值高' },
-    { words: ['privacy', 'local', 'self-hosted', 'offline'], scene: '本地与隐私', tags: ['本地运行', '隐私友好', '自己掌控'], title: '不想把数据交给云端？这个项目可以自己掌控。', value: '隐私价值高' },
-    { words: ['browser', 'extension', 'chrome', 'firefox'], scene: '浏览器增强', tags: ['浏览器插件', '效率工具', '轻量'], title: '每天都在用浏览器？它可能替你省下一些重复操作。', value: '使用频率高' },
-    { words: ['cli', 'developer', 'devtool', 'api', 'sdk'], scene: '开发与连接', tags: ['开发工具', '自动化', '可二次开发'], title: '需要把工具串起来？这个项目可能正好补上连接环节。', value: '扩展价值高' },
-  ]
-
-  const matchesWord = (word: string) => word.length <= 3
-    ? new RegExp(`(^|[^a-z])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z]|$)`).test(haystack)
-    : haystack.includes(word)
-  return mappings.find((item) => item.words.some(matchesWord)) ?? {
-    scene: '开源新工具',
-    tags: ['开源工具', repo.language ?? '值得探索', '可以改装'],
-    title: `发现一个叫 ${repo.name} 的项目，先用中文看懂它。`,
-    value: '探索价值高',
-  }
-}
-
-function repoToTool(repo: GitHubRepo) {
-  const category = classifyRepo(repo)
-  const updatedDays = Math.max(0, Math.round((Date.now() - new Date(repo.pushed_at).getTime()) / 86_400_000))
-  const activeText = updatedDays <= 14 ? '最近仍在活跃更新' : updatedDays <= 90 ? '近三个月有更新' : '适合先收藏观察'
-  const difficulty = category.tags.includes('能马上用') || category.tags.includes('浏览器插件') ? '上手低' : '上手中'
-  const accent = (repo.id % 3 === 0 ? 'ink' : repo.id % 2 === 0 ? 'teal' : 'coral') as 'ink' | 'teal' | 'coral'
-
-  return {
-    id: `github-${repo.id}`,
-    name: repo.name,
-    eyebrow: `${repo.language ?? '开源'} · ${compactNumber(repo.stargazers_count)} Star`,
-    title: category.title,
-    summary: `这是一个围绕“${category.scene}”打造的开源项目。${activeText}，可以先看看实际用途再决定是否尝试。`,
-    why: `它已经获得 ${compactNumber(repo.stargazers_count)} 个 Star，并且与你关注的“${category.tags[0]}”方向相邻。`,
-    tags: category.tags.slice(0, 3),
-    fit: updatedDays <= 30 ? '值得现在看看' : repo.stargazers_count >= 10_000 ? '口碑项目' : '探索性推荐',
-    difficulty,
-    value: category.value,
-    source: repo.html_url,
-    sourceLabel: 'GitHub 项目',
-    image: `https://opengraph.githubassets.com/1/${repo.full_name}`,
-    accent,
-    explore: true,
-    sourceKind: 'github' as const,
-    repository: {
-      owner: repo.owner.login,
-      name: repo.name,
-      fullName: repo.full_name,
-      stars: repo.stargazers_count,
-      language: repo.language,
-      updatedAt: repo.pushed_at,
-      topics: repo.topics ?? [],
-    },
-  }
-}
-
-function parseGitHubRepository(value: string) {
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    throw Object.assign(new Error('请输入完整的 GitHub 项目链接。'), { status: 400 })
-  }
-  if (url.hostname !== 'github.com' && url.hostname !== 'www.github.com') {
-    throw Object.assign(new Error('当前版本先支持 GitHub 项目链接。'), { status: 400 })
-  }
-  const [owner, repo] = url.pathname.split('/').filter(Boolean)
-  if (!owner || !repo) throw Object.assign(new Error('没有识别到项目名称。'), { status: 400 })
-  return { owner, repo: repo.replace(/\.git$/, '') }
 }
 
 app.get('/api/health', (_request, response) => {
@@ -315,8 +225,25 @@ app.get('/api/github/config', (request, response) => {
   })
 })
 
-app.get('/api/sources', (_request, response) => {
-  response.json({ sources: sourceRegistry })
+app.get('/api/sources', asyncRoute(async (_request, response) => {
+  response.json({ sources: sourceRegistry, connectors: await connectorStatuses() })
+}))
+
+/** 候选池状态。只暴露地址和计数，不暴露任何凭证。 */
+app.get('/api/candidates', (request, response) => {
+  const limit = Math.min(Math.max(Number(request.query.limit ?? 20), 1), 100)
+  response.json({
+    stats: poolStats(),
+    items: listPool(limit).map((entry) => ({
+      canonicalUrl: entry.canonicalUrl,
+      title: entry.candidate.title ?? null,
+      sourceKind: entry.candidate.sourceKind,
+      sourceIds: entry.sourceIds,
+      seenCount: entry.seenCount,
+      firstSeenAt: entry.firstSeenAt,
+      lastSeenAt: entry.lastSeenAt,
+    })),
+  })
 })
 
 app.get('/api/telegram/config', asyncRoute(async (_request, response) => {
@@ -343,7 +270,9 @@ app.get('/api/github/stars', asyncRoute(async (request, response) => {
     return
   }
   const repos = await githubFetch<GitHubRepo[]>(`/users/${encodeURIComponent(username)}/starred?per_page=30&sort=created&direction=desc`)
-  response.json({ username, tools: repos.filter((repo) => !repo.archived && !repo.fork).map(repoToTool) })
+  const usable = repos.filter(isUsableRepo)
+  upsertCandidates(usable.map((repo) => repoToCandidate(repo, 'github-stars', '我的 GitHub Star')))
+  response.json({ username, tools: usable.map((repo) => repoToTool(repo)) })
 }))
 
 app.get('/api/github/me/stars', asyncRoute(async (request, response) => {
@@ -353,14 +282,17 @@ app.get('/api/github/me/stars', asyncRoute(async (request, response) => {
     return
   }
   const repos = await githubFetch<GitHubRepo[]>('/user/starred?per_page=30&sort=created&direction=desc', session)
-  response.json({ username: session.user.login, tools: repos.filter((repo) => !repo.archived && !repo.fork).map(repoToTool) })
+  const usable = repos.filter(isUsableRepo)
+  upsertCandidates(usable.map((repo) => repoToCandidate(repo, 'github-stars', '我的 GitHub Star')))
+  response.json({ username: session.user.login, tools: usable.map((repo) => repoToTool(repo)) })
 }))
 
 app.post('/api/github/repository', asyncRoute(async (request, response) => {
   const { owner, repo } = parseGitHubRepository(String(request.body?.url ?? ''))
   const session = getSession(request)
   const result = await githubFetch<GitHubRepo>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, session)
-  response.json({ tool: repoToTool(result) })
+  const pool = upsertCandidates([repoToCandidate(result, 'manual', '我丢一个链接')])
+  response.json({ tool: repoToTool(result), pool: { size: pool.poolSize, added: pool.addedCount, duplicates: pool.duplicateCount } })
 }))
 
 app.get('/api/github/similar', asyncRoute(async (request, response) => {
@@ -374,19 +306,33 @@ app.get('/api/github/similar', asyncRoute(async (request, response) => {
   const source = await githubFetch<GitHubRepo>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, session)
   const topic = source.topics?.[0]
   const qualifiers = [topic ? `topic:${topic}` : '', source.language ? `language:${source.language}` : '', 'stars:>100'].filter(Boolean).join(' ')
-  const result = await githubFetch<{ items: GitHubRepo[] }>(`/search/repositories?q=${encodeURIComponent(qualifiers)}&sort=stars&order=desc&per_page=12`, session)
-  const tools = result.items.filter((item) => item.full_name !== source.full_name && !item.archived && !item.fork).slice(0, 8).map(repoToTool)
-  response.json({ source: source.full_name, tools })
+  const result = await githubFetch<GitHubSearchResult>(`/search/repositories?q=${encodeURIComponent(qualifiers)}&sort=stars&order=desc&per_page=12`, session)
+  const usable = result.items.filter((item) => item.full_name !== source.full_name && isUsableRepo(item)).slice(0, 8)
+  upsertCandidates(usable.map((item) => repoToCandidate(item, 'github-similar', '相似项目')))
+  response.json({ source: source.full_name, tools: usable.map((item) => repoToTool(item)) })
 }))
 
+/**
+ * 统一入口：路由只负责鉴权、限流和把结果送进候选池，
+ * 真正的抓取逻辑在 server/connectors/。
+ * 卡片由候选池里的 Candidate 反向渲染，而不是直接用原始 API 对象。
+ */
 app.get('/api/discover/github', asyncRoute(async (request, response) => {
   const customQuery = String(request.query.q ?? '').trim()
-  const recentDate = new Date(Date.now() - 180 * 86_400_000).toISOString().slice(0, 10)
-  const query = customQuery || `stars:>500 pushed:>${recentDate}`
   const session = getSession(request)
-  const result = await githubFetch<{ items: GitHubRepo[] }>(`/search/repositories?q=${encodeURIComponent(query)}&sort=updated&order=desc&per_page=24`, session)
-  const tools = result.items.filter((item) => !item.archived && !item.fork).map((repo) => ({ ...repoToTool(repo), explore: true }))
-  response.json({ source: 'github-discovery', query, tools })
+  const { candidates } = await githubDiscoveryConnector.fetchCandidates({
+    limit: 24,
+    query: customQuery || undefined,
+    auth: { token: session ? await refreshSessionIfNeeded(session) : undefined },
+  })
+  const pool = upsertCandidates(candidates)
+  const tools = candidates.map(candidateToTool).filter((tool): tool is NonNullable<typeof tool> => Boolean(tool))
+  response.json({
+    source: 'github-discovery',
+    query: customQuery || 'stars:>500 且最近 180 天有更新',
+    tools,
+    pool: { size: pool.poolSize, added: pool.addedCount, duplicates: pool.duplicateCount },
+  })
 }))
 
 app.put('/api/github/star/:owner/:repo', asyncRoute(async (request, response) => {

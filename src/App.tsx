@@ -186,7 +186,15 @@ function App() {
       const result = await api.discoverGitHub()
       mergeTools(result.tools)
       void enrichWithDeepSeek(result.tools)
-      setNotice(`发现 ${result.tools.length} 个近期活跃项目，可以继续往下刷。`)
+      const added = result.pool?.added ?? result.tools.length
+      const duplicates = result.pool?.duplicates ?? 0
+      if (result.tools.length === 0) {
+        setNotice('这次没有拿到项目，过一会儿再试，或者换个探索方向。')
+      } else if (duplicates > 0) {
+        setNotice(`找到 ${result.tools.length} 个项目，其中 ${added} 个是第一次看到，${duplicates} 个之前已经出现过。`)
+      } else {
+        setNotice(`发现 ${result.tools.length} 个近期活跃项目，都是新的，可以继续往下刷。`)
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '暂时无法读取 GitHub 新项目。')
     } finally { setBusy(false) }
