@@ -20,6 +20,12 @@ export type Candidate = {
   sourceItemId?: string
   title?: string
   description?: string
+  /**
+   * 来源侧归好的中文标签（例如「文件工具」「本地运行」）。
+   * 推荐评分用它做兴趣匹配；卡片渲染也复用同一批标签，
+   * 避免“评分用的标签”和“用户看到的标签”不一致。
+   */
+  tags?: string[]
   sourceKind: SourceKind
   /** 对应 server/sources.ts 里的来源 id，例如 github-discovery。 */
   sourceId: string
@@ -90,6 +96,8 @@ export type ToolCard = {
   image: string
   accent: 'coral' | 'teal' | 'ink'
   explore?: boolean
+  /** 来源 id，前端上报行为事件时带上，用于统计来源偏好。 */
+  sourceId?: string
   repository?: {
     owner: string
     name: string

@@ -1,4 +1,4 @@
-import type { GitHubConfig, SourceDescriptor, TelegramStatus, Tool } from '../types'
+import type { GitHubConfig, ProfileSummary, SourceDescriptor, TelegramStatus, Tool, UserEventName } from '../types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -41,4 +41,9 @@ export const api = {
   }),
   setStar: (owner: string, repo: string, active: boolean) => request<void>(`/api/github/star/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { method: active ? 'PUT' : 'DELETE' }),
   logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
+  /** 上报用户行为。调用方必须吞掉异常：埋点失败不能打断用户正在做的事。 */
+  recordEvents: (events: Array<{ toolId: string; event: UserEventName; sourceKind?: Tool['sourceKind']; sourceId?: string; tags?: string[] }>) =>
+    request<{ stored: number; rejected: number }>('/api/events', { method: 'POST', body: JSON.stringify({ events }) }),
+  profile: () => request<ProfileSummary>('/api/profile'),
+  recommend: (limit = 12) => request<{ source: string; hasProfile: boolean; updatedAt: string | null; considered: number; tools: Tool[] }>(`/api/recommend?limit=${limit}`),
 }

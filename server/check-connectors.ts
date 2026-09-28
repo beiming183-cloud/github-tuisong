@@ -73,8 +73,11 @@ check('卡片名称与 Star 保留',
   [tool?.name, tool?.repository?.stars, tool?.source], ['Example', 4321, 'https://github.com/owner/example'])
 check('卡片语言与标签保留',
   [tool?.repository?.language, (tool?.tags?.length ?? 0) > 0], ['TypeScript', true])
-check('直接渲染与往返渲染结果一致（除图片/来源标签外）',
-  { ...repoToTool(repo) }, { ...tool })
+check('直接渲染与往返渲染结果一致（sourceId 是候选独有的来源标记）',
+  { ...repoToTool(repo), sourceId: 'github-discovery' }, { ...tool })
+check('往返渲染带上来源 id，供前端上报行为用', tool?.sourceId, 'github-discovery')
+check('评分用的标签和卡片显示的标签完全一致',
+  tool?.tags, repoToTool(repo).tags)
 check('缺少 GitHub metadata 的候选不会生成卡片',
   candidateToTool({ canonicalUrl: 'https://example.com/x', sourceKind: 'rss', sourceId: 'rss', sourceLabel: 'RSS' }), undefined)
 

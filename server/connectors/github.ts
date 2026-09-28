@@ -98,6 +98,8 @@ export function repoToCandidate(repo: GitHubRepo, sourceId = 'github-discovery',
     sourceId,
     sourceLabel,
     sourcePublishedAt: repo.pushed_at,
+    // 与 repoToTool 用的是同一套分类，保证评分标签和卡片标签一致。
+    tags: classifyRepo(repo).tags.slice(0, 3),
     metadata,
   }
 }
@@ -133,7 +135,7 @@ function classifyRepo(repo: GitHubRepo) {
  * 规则版中文卡片。注意这是“启发式判断”，不是事实结论，
  * 文案里必须保留“可能”“先看看”这类谨慎语气（见手册 9.3 和 17.1）。
  */
-export function repoToTool(repo: GitHubRepo, sourceLabel = 'GitHub 项目'): ToolCard {
+export function repoToTool(repo: GitHubRepo, sourceLabel = 'GitHub 项目', sourceId?: string): ToolCard {
   const category = classifyRepo(repo)
   const updatedDays = Math.max(0, Math.round((Date.now() - new Date(repo.pushed_at).getTime()) / 86_400_000))
   const activeText = updatedDays <= 14 ? '最近仍在活跃更新' : updatedDays <= 90 ? '近三个月有更新' : '适合先收藏观察'
@@ -157,6 +159,7 @@ export function repoToTool(repo: GitHubRepo, sourceLabel = 'GitHub 项目'): Too
     accent,
     explore: true,
     sourceKind: 'github',
+    sourceId,
     repository: {
       owner: repo.owner.login,
       name: repo.name,
@@ -214,7 +217,10 @@ export function candidateToRepo(candidate: Candidate): GitHubRepo | undefined {
 
 export function candidateToTool(candidate: Candidate): ToolCard | undefined {
   const repo = candidateToRepo(candidate)
-  return repo ? repoToTool(repo, candidate.sourceLabel) : undefined
+  if (!repo) return undefined
+  const tool = repoToTool(repo, candidate.sourceLabel, candidate.sourceId)
+  // 卡片标签必须和评分用的候选标签完全一致，否则「为什么给你看」会对不上。
+  return candidate.tags && candidate.tags.length > 0 ? { ...tool, tags: candidate.tags } : tool
 }
 
 const DISCOVERY_WINDOW_DAYS = 180

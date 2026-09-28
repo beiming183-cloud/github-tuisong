@@ -10,10 +10,12 @@ type DetailDialogProps = {
   compared: boolean
   starred: boolean
   onStar: () => void
+  onDismiss: () => void
+  onOpenSource: () => void
   busy: boolean
 }
 
-export function DetailDialog({ tool, onClose, onSimilar, onCompare, compared, starred, onStar, busy }: DetailDialogProps) {
+export function DetailDialog({ tool, onClose, onSimilar, onCompare, compared, starred, onStar, onDismiss, onOpenSource, busy }: DetailDialogProps) {
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
       <section className="dialog-card detail-dialog" role="dialog" aria-modal="true" aria-labelledby="detail-title" onMouseDown={(event) => event.stopPropagation()}>
@@ -22,6 +24,12 @@ export function DetailDialog({ tool, onClose, onSimilar, onCompare, compared, st
         <div className="detail-heading"><div><p className="section-kicker">{tool.eyebrow}</p><h2 id="detail-title">{tool.title}</h2></div><span className="match-label">{tool.fit}</span></div>
         <p className="detail-summary">{tool.summary}</p>
         <div className="why-block"><span>为什么给你看</span><p>{tool.why}</p></div>
+        {tool.reasonDetails && tool.reasonDetails.length > 0 && (
+          <div className="reason-breakdown">
+            <span>这张卡片是怎么来的</span>
+            <ul>{tool.reasonDetails.map((detail) => <li key={detail}>{detail}</li>)}</ul>
+          </div>
+        )}
         <div className="detail-grid">
           <div><span>上手难度</span><strong>{tool.difficulty}</strong></div>
           <div><span>使用价值</span><strong>{tool.value}</strong></div>
@@ -33,7 +41,8 @@ export function DetailDialog({ tool, onClose, onSimilar, onCompare, compared, st
           <button className={starred ? 'secondary-action selected' : 'secondary-action'} onClick={onStar} disabled={busy}>{starred ? <Check size={15} /> : <GitBranch size={15} />} {starred ? '已 Star' : 'GitHub Star'}</button>
           <button className={compared ? 'secondary-action selected' : 'secondary-action'} onClick={onCompare}>{compared ? <Check size={15} /> : null} {compared ? '已加入比较' : '加入比较'}</button>
           <button className="secondary-action" onClick={onSimilar} disabled={busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <ArrowUpRight size={15} />} 找相似</button>
-          <a className="primary-button" href={tool.source} target="_blank" rel="noreferrer">打开项目 <ExternalLink size={15} /></a>
+          <a className="primary-button" href={tool.source} target="_blank" rel="noreferrer" onClick={onOpenSource}>打开项目 <ExternalLink size={15} /></a>
+          <button className="text-button" onClick={onDismiss}>不再推荐这类</button>
         </div>
       </section>
     </div>

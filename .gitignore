@@ -12,11 +12,10 @@ dist
 dist-ssr
 *.local
 .env
-data/session-secret
-data/sessions.json
-data/sessions.json.tmp
-data/telegram-session.json
-data/telegram-session.json.tmp
+
+# data/ 全部是运行时私密数据（会话密钥、加密会话、行为事件画像），整目录不提交。
+# 曾经逐个列文件名，新增数据文件时很容易漏一个，所以改成整目录忽略。
+data/
 
 # Playwright CLI 调试输出（截图、页面快照、控制台日志）
 .playwright-cli

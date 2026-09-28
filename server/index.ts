@@ -18,6 +18,14 @@ import {
   type GitHubSearchResult,
 } from './connectors/github.js'
 import { connectorStatuses } from './connectors/index.js'
+import { eventCount, eventStats, listEvents, recordEvents, type UserEventInput } from './events.js'
+import {
+  buildInterestProfile,
+  explainReasonCodes,
+  hasProfile,
+  rankCandidates,
+  summarizeProfile,
+} from './recommend.js'
 import { sourceRegistry } from './sources.js'
 import { disconnectTelegram, startTelegramLogin, telegramLoginStatus, telegramStatus } from './telegram.js'
 
@@ -229,6 +237,81 @@ app.get('/api/sources', asyncRoute(async (_request, response) => {
   response.json({ sources: sourceRegistry, connectors: await connectorStatuses() })
 }))
 
+/** 记录用户行为。丢一条埋点不应该影响用户正在做的事，所以部分非法条目只跳过不报错。 */
+app.post('/api/events', (request, response) => {
+  const raw = Array.isArray(request.body?.events) ? request.body.events : Array.isArray(request.body) ? request.body : [request.body]
+  const inputs = raw.filter((item: unknown): item is UserEventInput => Boolean(item) && typeof item === 'object')
+  const result = recordEvents(inputs)
+  response.json({ stored: result.stored.length, rejected: result.rejected, stats: eventStats() })
+})
+
+app.get('/api/events', (request, response) => {
+  const limit = Math.min(Math.max(Number(request.query.limit ?? 20), 1), 200)
+  response.json({
+    stats: eventStats(),
+    items: listEvents(limit).map((item) => ({
+      toolId: item.toolId,
+      event: item.event,
+      sourceId: item.sourceId ?? null,
+      tags: item.tags ?? [],
+      occurredAt: item.occurredAt,
+    })),
+  })
+})
+
+/** 兴趣画像。只返回推导结果和计数，不返回原始事件 id。 */
+app.get('/api/profile', (_request, response) => {
+  const profile = buildInterestProfile(listEvents())
+  response.json({
+    ...summarizeProfile(profile),
+    eventCount: eventCount(),
+    profile: {
+      tagWeights: profile.tagWeights,
+      sourceKindWeights: profile.sourceKindWeights,
+      sourceIdWeights: profile.sourceIdWeights,
+      positiveCount: profile.positiveCount,
+      negativeCount: profile.negativeCount,
+      skippedCount: profile.skippedToolIds.length,
+      dismissedCount: profile.dismissedToolIds.length,
+    },
+  })
+})
+
+/**
+ * 从候选池出推荐。这是候选池第一次真正参与排序：
+ * 评分 → 硬规则降权 → 多样性重排 → 渲染卡片。
+ */
+app.get('/api/recommend', (request, response) => {
+  const limit = Math.min(Math.max(Number(request.query.limit ?? 12), 1), 50)
+  const profile = buildInterestProfile(listEvents())
+  const entries = listPool(300)
+  const ranked = rankCandidates(entries, profile, { limit })
+
+  const tools = ranked
+    .map((item) => {
+      const tool = candidateToTool(item.candidate)
+      if (!tool) return undefined
+      return {
+        ...tool,
+        // 卡片上的「为什么给你看」直接用评分算出来的理由，而不是通用文案。
+        why: item.reason,
+        score: Math.round(item.total * 100) / 100,
+        reasonCodes: item.reasonCodes,
+        reasonDetails: explainReasonCodes(item.reasonCodes),
+        matchedTags: item.matchedTags,
+      }
+    })
+    .filter((tool): tool is NonNullable<typeof tool> => Boolean(tool))
+
+  response.json({
+    source: 'candidate-pool',
+    hasProfile: hasProfile(profile),
+    updatedAt: profile.updatedAt,
+    considered: entries.length,
+    tools,
+  })
+})
+
 /** 候选池状态。只暴露地址和计数，不暴露任何凭证。 */
 app.get('/api/candidates', (request, response) => {
   const limit = Math.min(Math.max(Number(request.query.limit ?? 20), 1), 100)
@@ -272,7 +355,7 @@ app.get('/api/github/stars', asyncRoute(async (request, response) => {
   const repos = await githubFetch<GitHubRepo[]>(`/users/${encodeURIComponent(username)}/starred?per_page=30&sort=created&direction=desc`)
   const usable = repos.filter(isUsableRepo)
   upsertCandidates(usable.map((repo) => repoToCandidate(repo, 'github-stars', '我的 GitHub Star')))
-  response.json({ username, tools: usable.map((repo) => repoToTool(repo)) })
+  response.json({ username, tools: usable.map((repo) => repoToTool(repo, 'GitHub 项目', 'github-stars')) })
 }))
 
 app.get('/api/github/me/stars', asyncRoute(async (request, response) => {
@@ -284,7 +367,7 @@ app.get('/api/github/me/stars', asyncRoute(async (request, response) => {
   const repos = await githubFetch<GitHubRepo[]>('/user/starred?per_page=30&sort=created&direction=desc', session)
   const usable = repos.filter(isUsableRepo)
   upsertCandidates(usable.map((repo) => repoToCandidate(repo, 'github-stars', '我的 GitHub Star')))
-  response.json({ username: session.user.login, tools: usable.map((repo) => repoToTool(repo)) })
+  response.json({ username: session.user.login, tools: usable.map((repo) => repoToTool(repo, 'GitHub 项目', 'github-stars')) })
 }))
 
 app.post('/api/github/repository', asyncRoute(async (request, response) => {
@@ -292,7 +375,7 @@ app.post('/api/github/repository', asyncRoute(async (request, response) => {
   const session = getSession(request)
   const result = await githubFetch<GitHubRepo>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, session)
   const pool = upsertCandidates([repoToCandidate(result, 'manual', '我丢一个链接')])
-  response.json({ tool: repoToTool(result), pool: { size: pool.poolSize, added: pool.addedCount, duplicates: pool.duplicateCount } })
+  response.json({ tool: repoToTool(result, 'GitHub 项目', 'manual'), pool: { size: pool.poolSize, added: pool.addedCount, duplicates: pool.duplicateCount } })
 }))
 
 app.get('/api/github/similar', asyncRoute(async (request, response) => {
@@ -309,7 +392,7 @@ app.get('/api/github/similar', asyncRoute(async (request, response) => {
   const result = await githubFetch<GitHubSearchResult>(`/search/repositories?q=${encodeURIComponent(qualifiers)}&sort=stars&order=desc&per_page=12`, session)
   const usable = result.items.filter((item) => item.full_name !== source.full_name && isUsableRepo(item)).slice(0, 8)
   upsertCandidates(usable.map((item) => repoToCandidate(item, 'github-similar', '相似项目')))
-  response.json({ source: source.full_name, tools: usable.map((item) => repoToTool(item)) })
+  response.json({ source: source.full_name, tools: usable.map((item) => repoToTool(item, 'GitHub 项目', 'github-similar')) })
 }))
 
 /**

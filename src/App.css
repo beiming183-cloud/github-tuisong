@@ -198,6 +198,19 @@ h1 em { color: var(--coral-dark); font-style: italic; }
 .compare-empty p { margin: 7px 0 0; color: var(--ink); font-family: 'Libre Baskerville', serif; font-size: 18px; }
 .compare-empty span { color: var(--ink-faint); font-size: 12px; }
 
+/* 「这张卡片是怎么来的」：推荐透明度，刻意做得比 why-block 更轻 */
+.reason-breakdown { margin: 0 0 20px; padding: 13px 15px; background: #f4f1e9; border: 1px dashed #d9d2c2; border-radius: 8px; }
+.reason-breakdown > span { display: block; margin-bottom: 9px; color: var(--ink-faint); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.reason-breakdown ul { margin: 0; padding-left: 17px; color: var(--ink-soft); font-size: 12px; line-height: 1.7; }
+.reason-breakdown li + li { margin-top: 3px; }
+
+/* 「我的兴趣」画像 */
+.profile-lines { margin: 0 0 20px; border-top: 1px solid var(--line); }
+.profile-lines > div { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 12px; padding: 12px 2px; border-bottom: 1px solid var(--line); }
+.profile-lines dt { color: var(--ink-faint); font-size: 11px; line-height: 1.6; }
+.profile-lines dd { margin: 0; color: var(--ink); font-size: 12.5px; line-height: 1.65; }
+.privacy-note code { padding: 1px 4px; background: #efe9dd; border-radius: 4px; font-size: 10.5px; }
+
 @keyframes dock-in { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }

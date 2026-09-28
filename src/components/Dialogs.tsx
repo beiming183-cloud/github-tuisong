@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { GitBranch, Link as LinkIcon, LoaderCircle, ShieldCheck, X } from 'lucide-react'
-import type { GitHubConfig } from '../types'
+import { GitBranch, Link as LinkIcon, LoaderCircle, ShieldCheck, Sparkles, X } from 'lucide-react'
+import type { GitHubConfig, ProfileSummary } from '../types'
 
 type ConnectDialogProps = {
   config: GitHubConfig
@@ -93,6 +93,42 @@ export function LinkDialog({ busy, error, onClose, onImport }: LinkDialogProps) 
           <button className="primary-button wide" disabled={busy || !url.trim()}>{busy ? <LoaderCircle className="spin" size={17} /> : <LinkIcon size={17} />} 分析这个项目</button>
         </form>
         {error && <p className="dialog-error" role="alert">{error}</p>}
+      </section>
+    </div>
+  )
+}
+
+type ProfileDialogProps = {
+  summary: ProfileSummary | null
+  onClose: () => void
+}
+
+/**
+ * 「我的兴趣」弹窗。
+ * 只展示服务端从真实行为推导出来的画像，不做任何美化或猜测；
+ * 没有行为时明确说「还不够」，而不是编一个看起来很像的画像。
+ */
+export function ProfileDialog({ summary, onClose }: ProfileDialogProps) {
+  return (
+    <div className="dialog-backdrop" onMouseDown={onClose}>
+      <section className="dialog-card compact-dialog" role="dialog" aria-modal="true" aria-labelledby="profile-title" onMouseDown={(event) => event.stopPropagation()}>
+        <button className="dialog-close" onClick={onClose} aria-label="关闭"><X size={18} /></button>
+        <div className="dialog-icon"><Sparkles size={21} /></div>
+        <p className="section-kicker">系统现在怎么看你</p>
+        <h2 id="profile-title">你的兴趣画像</h2>
+        {!summary
+          ? <p className="dialog-copy">正在读取你的行为记录……</p>
+          : <>
+            <p className="dialog-copy">{summary.headline}</p>
+            {summary.lines.length > 0 && (
+              <dl className="profile-lines">
+                {summary.lines.map((line) => (
+                  <div key={line.label}><dt>{line.label}</dt><dd>{line.detail}</dd></div>
+                ))}
+              </dl>
+            )}
+            <div className="privacy-note"><ShieldCheck size={16} /><span>这些记录只存在你自己的电脑上（<code>data/events.json</code>），不会上传，也不会写进代码仓库。</span></div>
+          </>}
       </section>
     </div>
   )
