@@ -1,0 +1,14 @@
+# 统一行尾为 LF，避免多工具 / 跨平台协作产生整文件换行差异
+* text=auto eol=lf
+
+# 二进制文件不做文本转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+
+# 锁文件在合并时不要自动解决冲突
+package-lock.json -diff merge=binary
