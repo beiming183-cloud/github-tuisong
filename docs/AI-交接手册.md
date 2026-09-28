@@ -129,6 +129,7 @@ OpenRadar Personal 不是一个 GitHub 热榜，也不是新闻聚合站。
 - [x] 卡片由候选反向渲染（`candidateToTool`），不再直接依赖原始 API 响应。
 - [x] `npm run check` 自检：16 项 canonicalUrl / 去重 / 卡片往返用例。
 - [x] Git 仓库与远端 `git@github.com:beiming183-cloud/github-tuisong.git`。
+- [x] 修复 Vite 只监听 `::1`、导致 `http://127.0.0.1:5173/` 打不开且 OAuth 回调失败的问题。
 - [x] `npm run build` 通过。
 - [x] `npm run lint` 通过。
 
@@ -293,6 +294,8 @@ npm run dev:api
 - API：`http://127.0.0.1:8787/`
 - 健康检查：`http://127.0.0.1:8787/api/health`
 
+`vite.config.ts` 里显式写了 `server.host: '127.0.0.1'`，**不要删**。Vite 默认只监听 `localhost`，在 Windows + 较新 Node 上会解析到 `::1`（仅 IPv6），于是上面这个 `127.0.0.1:5173` 会连接被拒，GitHub OAuth 回调重定向到 `APP_URL` 时也会打不开页面。API 侧本来就是 `app.listen(port, '127.0.0.1')`，两边保持一致。
+
 ### 5.3 构建和静态检查
 
 每次重要修改后运行：
@@ -339,6 +342,9 @@ npm run lint
 - 手动丢链接：`https://github.com/qarmin/czkawka/tree/master` 与 `https://www.github.com/Qarmin/Czkawka.git` 归一化为同一条候选，第二次为 `added=0, duplicates=1`。
 - Telegram 当前 `/api/telegram/config`：`configured: false`，因为尚未成功获得 API ID/API Hash。
 - DeepSeek 当前未配置 Key，规则结果可用。
+
+- 地址验证：修复 host 后 `http://127.0.0.1:5173/` 与 `http://localhost:5173/` 均返回 200，Vite 的 `/api` 代理正常。
+- 通过 5173 代理走完整链路：`/api/discover/github` 首次 `added=24`，第二次 `added=0, duplicates=24`。
 
 **尚未完成**：浏览器手动验证。本轮改动只做了接口级冒烟测试，还没有在浏览器里点过“探索”，下一位接手时请补上。
 
@@ -1317,6 +1323,12 @@ dismiss    -4
 - 空态和错误态要继续像产品，而不是像开发日志。
 - 移动端要优先保证刷卡片和打开详情，不要优先堆设置。
 
+### 17.6 本地地址与 IPv4 / IPv6
+
+- Windows + 较新 Node 上，`localhost` 常解析到 `::1`（仅 IPv6）。Vite 默认只监听 `localhost`，因此必须显式绑定 `127.0.0.1`，否则手册里写的 `http://127.0.0.1:5173/` 打不开。
+- 这个坑最隐蔽的后果是 GitHub OAuth：回调最后重定向到 `APP_URL`，地址写对了但服务没在 IPv4 上监听，用户看到的是一次“连接失败”。
+- 改端口、改 host、升级 Vite 或 Node 之后，务必重新确认 `http://127.0.0.1:5173/` 能打开，而不只是 `localhost` 能打开。
+
 ---
 
 ## 18. 用户沟通口径
@@ -1405,6 +1417,10 @@ DeepSeek 用来分析、改写、匹配和比较；被推荐的项目不需要�
 ### 2026-09-28：来源状态不再虚标
 
 `rss` 曾登记为 `ready` 但没有任何抓取代码，属于对用户虚报能力，已改为 `coming_soon` 并在描述里写明“目前还没有抓取代码”。以后新增来源必须让 `/api/sources` 的 `connectors` 自检结果与登记状态一致。
+
+### 2026-09-28：修复 Vite 只监听 IPv6 回环
+
+手册和 `.env.example` 都写 `http://127.0.0.1:5173`，但 Vite 实际只监听 `::1`，导致该地址连接被拒，GitHub OAuth 回调重定向也会失败。已在 `vite.config.ts` 显式设置 `server.host: '127.0.0.1'`，与 API 的绑定保持一致。这是验证阶段实测发现的，不是猜测。
 
 ---
 
