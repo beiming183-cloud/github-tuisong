@@ -21,5 +21,6 @@ export const sourceRegistry: SourceDescriptor[] = [
   { id: 'hacker-news', label: 'Hacker News', kind: 'hacker-news', status: 'coming_soon', description: '保留为探索来源，默认不混入推荐流。' },
   { id: 'product-hunt', label: 'Product Hunt', kind: 'product-hunt', status: 'needs_config', description: '需要单独配置来源 API，之后再接入。' },
   { id: 'telegram', label: '纸飞机频道 / 资源群', kind: 'telegram', status: 'needs_config', description: '配置 Telegram API 后可扫码连接；等你提供频道后接入消息。' },
+  { id: 'telegram-public', label: '纸飞机公开频道', kind: 'telegram', status: 'needs_config', description: '粘贴公开频道链接即可读取；不需要 Telegram API。每天最多自动读取一次。' },
   { id: 'manual', label: '我丢一个链接', kind: 'manual', status: 'ready', description: '手动提交一个项目，让 OpenRadar 帮你分析。' },
 ]

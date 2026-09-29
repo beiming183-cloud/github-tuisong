@@ -36,6 +36,8 @@ export type Candidate = {
   rawText?: string
   /** 来源专属字段。GitHub 的约定结构见 connectors/github.ts。 */
   metadata?: Record<string, unknown>
+  /** 处理状态；历史候选没有该字段时按 ready 兼容。 */
+  status?: 'raw' | 'staged' | 'analyzed' | 'ready' | 'filtered' | 'dismissed' | 'failed' | 'pending'
 }
 
 /**
@@ -86,7 +88,6 @@ export type ToolCard = {
   eyebrow: string
   title: string
   summary: string
-  why: string
   tags: string[]
   fit: string
   difficulty: string

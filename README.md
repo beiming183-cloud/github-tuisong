@@ -2,7 +2,7 @@
 
 面向个人的中文「新工具发现与研究助手」。它不是 GitHub 热榜，也不是新闻聚合站，而是把分散在项目、频道和工具目录里的新东西，整理成一眼能看懂的中文卡片，并通过你的真实行为慢慢理解你喜欢什么。
 
-当前状态：V0.5 —— 推荐流、GitHub 接入、统一候选池与去重、行为事件与可解释兴趣评分都已可用；候选池仍是内存态，Telegram 频道抓取仍受外部条件阻塞。
+当前状态：V0.6 —— 推荐流、GitHub 接入、统一候选池与去重、行为事件与可解释兴趣评分都已可用；候选池已支持服务端本地 JSON 恢复；Telegram 公开频道已经可以作为补充来源，按消息 ID 做增量读取，个人账号 API 登录仍是可选路线。
 
 ## AI 协同开发交接
 
@@ -24,7 +24,9 @@
 - GitHub 公开用户名导入 Star、项目链接分析、相似项目搜索
 - 可选 GitHub OAuth：读取自己的 Star，并同步一键 Star
 - 可选 DeepSeek 中文分析：把英文项目资料改写成场景化中文卡片
-- Telegram 个人账号 QR 登录基础链路（频道抓取将在提供频道后接入）
+- Telegram 个人账号 QR 登录基础链路（需要 API ID/API Hash；与公开频道路线分开）
+- Telegram 公开频道来源框架：频道配置、增量状态、候选池接入和每天最多一次的本地调度
+- 原始消息暂存区：广告过滤、待处理状态和后续人工筛选接口
 
 ## 本地运行
 
@@ -91,8 +93,30 @@ npm run smoke -- http://127.0.0.1:8799
 - `GET /api/ai/config`：检查 DeepSeek 是否已配置；
 - `POST /api/ai/enrich`：传入 `{ "tools": [...] }`，返回中文卡片补丁。
 
-## Telegram 连接（外部阻塞中）
+## Telegram 连接（两条路线）
 
 Telegram 桌面端的登录状态不能直接被网页读取。需要在 [my.telegram.org](https://my.telegram.org) 的 API development tools 创建个人 API，填写 `TELEGRAM_API_ID` 和 `TELEGRAM_API_HASH` 后，页面会用 QR 码让已登录的 Telegram 客户端确认一次。会话会加密保存到 `data/telegram-session.json`。
 
 当前这个创建应用的页面只返回 `ERROR`，属于 Telegram 官方侧的问题，不是本项目代码问题。二维码登录的代码已经写好，等凭证可用后即可继续接入频道消息。
+
+### 不需要 API 的公开频道读取
+
+如果只想先读取公开频道，可以运行：
+
+```bash
+npm run telegram:read -- @telegram --limit 20
+```
+
+脚本读取 Telegram 的公开网页预览 `https://t.me/s/<频道名>`，不会登录、不读取浏览器 Cookie，也不能读取私有频道。结果默认保存到 `data/telegram-web/<频道名>.json`，后续可以接入 OpenRadar 的候选池。
+
+应用内的公开频道入口已经接通：打开“连接纸飞机”，在“添加公开频道”中每行粘贴一个频道链接，先点“只保存频道”；需要测试时再单独点“手动读取”。频道配置保存到 `data/telegram-web/channels.json`，消息进度保存到 `data/telegram-web/state.json`；同步会提取 GitHub 项目、补充仓库信息、进入候选池并参与推荐。首次同步必须手动触发，不会因为刚配置频道就自动回看；完成过一次同步后，默认每 24 小时最多自动增量同步一次，后续再由用户手动决定首次读取 200、500 条或更多。
+
+服务端接口：
+
+- `GET /api/telegram/public/status`：查看频道、最后消息 ID 和同步状态；
+- `PUT /api/telegram/public/channels`：保存公开频道链接；
+- `POST /api/telegram/public/sync`：手动同步，可传 `channels`、`limit`、`pages`。
+
+Telegram 频道在系统里是补充来源，GitHub 和其他开源目录仍然是主体；同一个仓库从多个地方出现时会合并为一个候选，并保留多个来源记录。频道可以是中文或英文，英文内容后续交给 DeepSeek 翻译和归纳，不会因为语言不同而过滤。
+
+批量内容不会直接灌进推荐流。原始消息会先进入 `data/staging.json` 暂存区；疑似 VPN、机场、节点、优惠码和推广内容会标记为 `filtered`，不提取为推荐候选。暂存区接口为 `GET /api/staging` 和 `PATCH /api/staging/:id`，状态包括 `new`、`ready`、`dismissed`、`filtered`。

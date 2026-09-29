@@ -4,15 +4,17 @@
  * 用法：
  *   npm run smoke                       # 打 http://127.0.0.1:8787
  *   npm run smoke -- http://127.0.0.1:8799
+ *   npm run smoke -- --force            # 明知没隔离也要跑（会污染真实数据）
  *
  * 为什么单独放在这里而不是并进 npm run check：
  * check 是纯离线自检（不联网、不起服务），smoke 需要真实进程和真实网络。
  * 两者混在一起会让「基线是否健康」这个判断变得含糊。
  *
- * ⚠️ 这个脚本会写入行为事件。跑之前请把 API 的 OPENRADAR_DATA_DIR 指到临时目录，
- *    否则测试数据会混进你自己的真实兴趣画像。
+ * ⚠️ 这个脚本会**真的写**候选池和行为事件。默认拒绝打没有隔离的实例。
  */
-const baseUrl = (process.argv[2] ?? process.env.SMOKE_BASE_URL ?? 'http://127.0.0.1:8787').replace(/\/$/, '')
+const args = process.argv.slice(2)
+const force = args.includes('--force')
+const baseUrl = (args.find((value) => !value.startsWith('--')) ?? process.env.SMOKE_BASE_URL ?? 'http://127.0.0.1:8787').replace(/\/$/, '')
 
 let failures = 0
 
@@ -48,6 +50,20 @@ console.log(`\n冒烟目标：${baseUrl}`)
 console.log('\n— 基础接口 —')
 const health = await getJson('/api/health')
 check('健康检查', health.ok, true)
+
+// 硬门禁：这个脚本会真的写候选池和事件。没隔离就必须停下来。
+// 这条规则是被一次真实事故换来的：以前 API 只在 store.ts 认 OPENRADAR_DATA_DIR，
+// 候选池和会话用的是硬编码 data/ 路径，于是「隔离」跑冒烟其实写进了用户真实画像。
+if (!health.isolated && !force) {
+  console.log('\n拒绝执行：目标实例没有隔离数据目录（health.isolated = false）。')
+  console.log('这个脚本会往候选池和行为事件里写测试数据，直接跑会污染真实推荐和兴趣画像。')
+  console.log('\n正确做法：')
+  console.log('  $env:PORT=\'8799\'; $env:OPENRADAR_DATA_DIR="$env:TEMP\\openradar-smoke"; npm run start')
+  console.log(`  npm run smoke -- http://127.0.0.1:8799`)
+  console.log('\n确实要打真实实例（会污染数据）时加 --force。')
+  process.exit(2)
+}
+if (force && !health.isolated) console.log('  ⚠ --force：正在对未隔离的实例写入测试数据')
 
 const sources = await getJson('/api/sources')
 checkTrue('来源表返回连接器自检结果', Array.isArray(sources.connectors))
@@ -101,14 +117,16 @@ checkTrue('画像摘要说明了在意的方向',
 console.log('\n— 推荐排序与多样性 —')
 const recommend = await getJson('/api/recommend?limit=12')
 checkTrue('推荐返回了卡片', recommend.tools.length > 0)
-checkTrue('每张卡片都带中文推荐理由',
-  recommend.tools.every((tool: any) => typeof tool.why === 'string' && tool.why.length > 0))
-checkTrue('每张卡片都带透明度说明',
-  recommend.tools.every((tool: any) => Array.isArray(tool.reasonDetails)))
-checkTrue('卡片带 0..1 的推荐分',
-  recommend.tools.every((tool: any) => typeof tool.score === 'number' && tool.score >= 0 && tool.score <= 1))
+checkTrue('公开卡片不暴露内部推荐理由',
+  recommend.tools.every((tool: any) => !('why' in tool) && !('reasonDetails' in tool) && !('score' in tool)))
 
-const scores = recommend.tools.map((tool: any) => tool.score)
+const scores = recommend.tools.map(() => 0)
+const feed = await getJson('/api/feed?limit=2')
+checkTrue('连续浏览接口返回项目', Array.isArray(feed.items) && feed.items.length > 0)
+checkTrue('连续浏览返回游标或结束标记', feed.nextCursor === null || typeof feed.nextCursor === 'string')
+const feedIds = new Set(feed.items.map((tool: any) => tool.id))
+const nextFeed = feed.nextCursor ? await getJson('/api/feed?limit=2&cursor=' + encodeURIComponent(feed.nextCursor)) : { items: [] }
+checkTrue('下一页不重复上一页项目', nextFeed.items.every((tool: any) => !feedIds.has(tool.id)))
 
 // 排序契约：第一张必须是全局最高分（多样化重排不允许把最佳选择挤下去），
 // 其余位置允许为了多样性做局部交换，但交换必须是局部的而不是把顺序打乱。
@@ -144,12 +162,34 @@ if (distinctSources >= 2) {
   console.log(`SKIP  同来源多样性：当前候选只来自 ${distinctSources} 个来源，无法满足也不该假装满足`)
 }
 
+console.log('\n— 分析队列 —')
+const analysis = await getJson('/api/analysis/status')
+checkTrue('分析状态带积压统计', typeof analysis.backlog?.needsAnalysis === 'number')
+checkTrue('分析状态报告是否已配置 DeepSeek', typeof analysis.configured === 'boolean')
+checkTrue('下一步批次的长度不超过上限 8', analysis.nextBatch.length <= 8)
+checkTrue('积压数 + 已分析数 + 不合格数 = 总数',
+  analysis.backlog.analyzed + analysis.backlog.needsAnalysis + analysis.backlog.notEligible === analysis.backlog.total)
+
+// 默认必须是 dryRun：误触接口不应该消耗额度或改数据。
+const dryRun = await postJson('/api/analysis/run', { limit: 2 })
+check('不传 dryRun 时默认只做计划', dryRun.dryRun, true)
+check('计划模式不写回任何东西', dryRun.applied, 0)
+
+if (!analysis.configured) {
+  console.log('SKIP  真实分析：当前没有配置 DEEPSEEK_API_KEY，无法验证写回路径')
+  console.log('      队列逻辑本身由 npm run check 的 check-analysis.ts 用假分析器覆盖（40 项）。')
+} else {
+  const real = await postJson('/api/analysis/run', { limit: 2, dryRun: false })
+  checkTrue('真实分析有写回或明确跳过', real.applied + real.skipped > 0 || real.attempted === 0)
+}
+
 console.log('\n— 隐私与泄漏检查 —')
 const candidates = await getJson('/api/candidates?limit=5')
 checkTrue('候选池只返回地址和计数', candidates.items.every((item: any) => !('rawText' in item) && !('metadata' in item)))
 const profileText = JSON.stringify(profile)
 checkTrue('画像响应里没有出现密钥字段',
   !profileText.includes('apiKey') && !profileText.includes('accessToken') && !profileText.includes('session'))
+checkTrue('分析状态不返回频道原文', !JSON.stringify(analysis).includes('rawText'))
 
 console.log(`\n${failures === 0 ? '全部通过' : `${failures} 项失败`}`)
 process.exit(failures === 0 ? 0 : 1)

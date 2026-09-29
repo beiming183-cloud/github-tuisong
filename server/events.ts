@@ -9,10 +9,8 @@
  * 以后换 SQLite 时这里是唯一的对接点。
  */
 import crypto from 'node:crypto'
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import type { SourceKind } from './connectors/types.js'
+import { clearStoredEvents, insertEvents, listStoredEvents, trimStoredEvents } from './store.js'
 
 export type UserEventName =
   | 'view'
@@ -69,21 +67,6 @@ export type UserEventInput = {
   occurredAt?: string
 }
 
-const currentDir = path.dirname(fileURLToPath(import.meta.url))
-const projectDir = path.resolve(currentDir, '..')
-/**
- * 事件文件的位置。
- *
- * 支持 `OPENRADAR_DATA_DIR` 覆盖，目的是让 `npm run smoke` 能把测试行为事件
- * 写进临时目录，而不是污染本机真实画像。
- * 注意：只有本文件认这个变量（会话密钥和 Telegram 会话不认），
- * 所以它只用于隔离行为事件，不是通用的数据目录开关。
- */
-const dataDir = process.env.OPENRADAR_DATA_DIR
-  ? path.resolve(process.env.OPENRADAR_DATA_DIR)
-  : path.join(projectDir, 'data')
-const eventsFile = path.join(dataDir, 'events.json')
-
 /** 单次请求最多接受多少条事件，避免前端异常时写爆文件。 */
 export const MAX_EVENTS_PER_REQUEST = 50
 /** 文件里保留多少条最新事件。 */
@@ -96,27 +79,7 @@ function isEventName(value: unknown): value is UserEventName {
 }
 
 function loadEvents() {
-  fs.mkdirSync(dataDir, { recursive: true })
-  if (!fs.existsSync(eventsFile)) return
-  try {
-    const parsed = JSON.parse(fs.readFileSync(eventsFile, 'utf8')) as unknown
-    if (!Array.isArray(parsed)) return
-    events = parsed.filter((item): item is UserEvent => {
-      if (!item || typeof item !== 'object') return false
-      const candidate = item as Partial<UserEvent>
-      return typeof candidate.toolId === 'string' && isEventName(candidate.event) && typeof candidate.occurredAt === 'string'
-    })
-  } catch {
-    console.warn('OpenRadar 无法读取已有行为事件，将从空画像开始。')
-    events = []
-  }
-}
-
-function persistEvents() {
-  fs.mkdirSync(dataDir, { recursive: true })
-  const temporary = `${eventsFile}.tmp`
-  fs.writeFileSync(temporary, JSON.stringify(events), { mode: 0o600 })
-  fs.renameSync(temporary, eventsFile)
+  events = listStoredEvents(MAX_STORED_EVENTS).filter((item) => isEventName(item.event))
 }
 
 loadEvents()
@@ -148,7 +111,8 @@ export function recordEvents(inputs: UserEventInput[]): { stored: UserEvent[]; r
   if (stored.length > 0) {
     events = [...events, ...stored]
     if (events.length > MAX_STORED_EVENTS) events = events.slice(events.length - MAX_STORED_EVENTS)
-    persistEvents()
+    insertEvents(stored)
+    trimStoredEvents(MAX_STORED_EVENTS)
   }
 
   return { stored, rejected }
@@ -187,5 +151,5 @@ export function eventStats(): EventStats {
  */
 export function clearEvents() {
   events = []
-  if (fs.existsSync(eventsFile)) fs.rmSync(eventsFile)
+  clearStoredEvents()
 }

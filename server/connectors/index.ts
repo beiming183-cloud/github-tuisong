@@ -8,10 +8,12 @@
  * 4. 更新交接手册第 8 节和第 12 节。
  */
 import { githubDiscoveryConnector } from './github.js'
+import { telegramPublicConnector } from './telegram-public.js'
 import type { ConnectorConfigStatus, SourceConnector } from './types.js'
 
 export const connectors: SourceConnector[] = [
   githubDiscoveryConnector,
+  telegramPublicConnector,
 ]
 
 export function findConnector(id: string) {

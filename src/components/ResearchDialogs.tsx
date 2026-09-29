@@ -23,13 +23,6 @@ export function DetailDialog({ tool, onClose, onSimilar, onCompare, compared, st
         <div className={`detail-visual ${tool.accent}`}><Radar size={28} /><span>{tool.name}</span><small>{tool.sourceLabel}</small></div>
         <div className="detail-heading"><div><p className="section-kicker">{tool.eyebrow}</p><h2 id="detail-title">{tool.title}</h2></div><span className="match-label">{tool.fit}</span></div>
         <p className="detail-summary">{tool.summary}</p>
-        <div className="why-block"><span>为什么给你看</span><p>{tool.why}</p></div>
-        {tool.reasonDetails && tool.reasonDetails.length > 0 && (
-          <div className="reason-breakdown">
-            <span>这张卡片是怎么来的</span>
-            <ul>{tool.reasonDetails.map((detail) => <li key={detail}>{detail}</li>)}</ul>
-          </div>
-        )}
         <div className="detail-grid">
           <div><span>上手难度</span><strong>{tool.difficulty}</strong></div>
           <div><span>使用价值</span><strong>{tool.value}</strong></div>
@@ -70,4 +63,3 @@ export function CompareDialog({ tools, onClose, onRemove }: CompareDialogProps) 
     </div>
   )
 }
-

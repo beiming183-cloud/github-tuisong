@@ -4,7 +4,7 @@
 >
 > 编写时间：2026-09-28
 >
-> 当前项目状态：V0.5 前端原型 + GitHub 接入 + 统一候选池与连接器 + 行为事件与可解释兴趣评分 + DeepSeek 可选接入 + Telegram QR 登录骨架
+> 当前项目状态：V0.6 前端原型 + GitHub 接入 + 统一候选池与连接器 + 行为事件与可解释兴趣评分 + DeepSeek 可选接入 + Telegram 公开频道增量来源 + Telegram QR 登录骨架
 >
 > 项目目录：`D:\Codex\Projects\openradar-personal`
 >
@@ -12,42 +12,44 @@
 
 ---
 
-## 进度快照（2026-09-28 收尾）
+## 进度快照（2026-09-29）
 
 **当前状态：`main` 与 `origin/main` 一致，没有未推送提交。**（用 `git log -1 --oneline` 看确切提交号；本文档不写死哈希，因为写下它本身就会产生新提交。）
 
-本轮（2026-09-28）做完的、全部已验证并推送的提交：
+### 两个代理的交接已完成
+
+2026-09-28 到 09-29 期间，Codex 和另一个代理在同一个仓库里并行开发过。现在 Codex **已经收尾**，它的成果由接手方一并落库。按时间顺序：
 
 | 提交 | 内容 |
 |---|---|
 | `4d54fa1` | 统一候选 `Candidate` + 来源连接器接口，GitHub 参考实现 + canonicalUrl 去重 |
 | `7b75ad1` | 修复 Vite 只监听 IPv6 导致 `127.0.0.1:5173` 打不开、OAuth 回调失败 |
 | `25f4932` | 行为事件记录 + 第一版可解释兴趣评分 + 多样性重排 + 前端展示 |
-| `9bf7359` | 修复来源解释编造关系（通用探索谎称"从你感兴趣的项目延伸"） |
-| `e83a015` | 修正手册过期数字；**此提交被 `git add -A` 污染，内含 Codex 的文件** |
-| `78ab951` | 记录 Codex 并行开发事故与 Telegram 公开频道新路线 |
-| `5399837` | 增加本进度快照 |
+| `9bf7359` | 修复来源解释编造关系（通用探索谎称“从你感兴趣的项目延伸”） |
+| `e83a015` | 修正手册过期数字；**此提交被 `git add -A` 污染，内含并行代理的文件** |
+| `78ab951` | 记录并行开发事故与 Telegram 公开频道新路线 |
+| 后续提交 | Codex 的 SQLite 持久化 / feed 分页 / Telegram 公开频道来源，以及接手方的分析队列与隔离修复 |
 
-**⚠️ 有第二个代理正在同一仓库里工作。** 收尾时检测到 `codex-quota.js --attach` 进程（Codex），它当时正在做 Telegram 公开频道读取。以下文件属于它、**未提交是有意为之，不要清理、覆盖或回滚**：
+### 现在可以做什么
 
-| 路径 | 状态 |
-|---|---|
-| `README.md` | 被它追加了 Telegram 公开频道章节，未提交 |
-| `docs/telegram-web-reader.md` | 它新建的说明文档，未跟踪 |
-| `scripts/telegram-public-reader.mjs` | 它写的脚本，**已被我的 `git add -A` 误提交进 `e83a015`** |
-| `package.json` 的 `telegram:read` | 同上，已被误提交 |
-
-因为最后一项，`e83a015` 的提交信息与内容不符（信息是改手册数字，内容里多了那个脚本）。**没有回滚它**——那是它正在进行的工作。
+- 页面、GitHub 发现、Telegram 公开频道、候选池持久化、行为画像和个性化排序都能跑。
+- `npm run check` 有 103 项离线用例；`npm run smoke` 有 32 项接口断言并带隔离门禁。
+- **待配置**：`DEEPSEEK_API_KEY`（分析队列从未真实跑过）、`TELEGRAM_API_ID`/`API_HASH`（个人账号登录）。
+- **待人工确认**：浏览器手动验证（第 5.4 节），至今无人执行。
 
 **下一步优先级**：
 
-1. 浏览器手动验证（第 5.4 节的清单，至今没有任何人做过，所有验证都只到接口层）。
-2. P0-6：候选池落 SQLite + "继续刷"分页（用内置 `node:sqlite`，见第 16 节）。
-3. 和 Codex 协调 Telegram 公开频道读取的归属，决定它是否并进候选池。
+1. 配好 DeepSeek Key，小批跑通分析队列（99 个候选、已分析 0 个）。
+2. 浏览器手动验证第 5.4 节清单。
+3. 回填：等下一次 Telegram 同步撞上 GitHub 限流产生 `pending` 后再验证限流提前停止的行为。
+4. P1：继续补 GitHub 之外的开源社区来源；Telegram 作为补充，不要抢掉主发现入口。
 
-**给下一位的硬规则**：禁止 `git add -A` / `git add .`，只能按路径显式暂存，提交前核对暂存清单。这条是踩过坑换来的，详见 15.7 节。
+**两条硬规则**（都是踩过坑换来的）：
 
-来源：进度快照是收尾时按实际仓库状态写的，不是回顾记忆。
+1. 禁止 `git add -A` / `git add .`，只能按路径显式暂存，提交前核对暂存清单。见 15.7 节。
+2. 声明「用 `OPENRADAR_DATA_DIR` 隔离测试数据」之后必须**实测**，不能只看临时目录里生成了文件。见 17.8 节。
+
+来源：进度快照按实际仓库状态写，不是回顾记忆。
 
 ---
 
@@ -61,7 +63,7 @@ OpenRadar Personal 不是一个 GitHub 热榜，也不是新闻聚合站。
 
 > “我不想先学会 GitHub，也不想看一堆新闻；我只想舒服地刷到一些可能真的有用、看得懂、值得试试的东西。”
 
-当前主页面已经可以运行，但它仍然是一个单用户本地原型。真实的长期推荐、多个来源的统一抓取、Telegram 频道读取、持久化兴趣画像和正式部署都还没有完成。
+当前主页面已经可以运行，但它仍然是一个单用户本地原型。真实的长期推荐、多个来源的统一抓取、候选池持久化和正式部署都还没有完成；Telegram 公开频道已经有第一版增量来源，个人账号读取仍未配置。
 
 ---
 
@@ -135,6 +137,29 @@ OpenRadar Personal 不是一个 GitHub 热榜，也不是新闻聚合站。
 - 横向比较 2～3 个项目。
 - 说明“如果想少折腾，先选哪个；如果想改装，选哪个”。
 
+### 2.4 长期工具库与统一风格（2026-09-29 新确认）
+
+用户希望系统最终沉淀一两千个可持续筛选的项目，能够支持连续浏览和后续大规模推送。这个数量属于后台候选储备，不是首页一次展示一两千张卡片；首页仍然只给用户当前最值得看的部分。数量增加后，界面和内容风格必须统一：来源可以是 GitHub、Telegram、FOSS 目录或其他开源社区，但用户看到的卡片都要使用同一套中文结构。
+
+统一卡片至少包含：
+
+```text
+项目名 / 一句话说明 / 主要用途 / 适合谁 / 上手难度
+所属分类 / 关键词 / 来源 / 最近活跃时间 / 是否值得现在尝试
+```
+
+分类不能只靠频道名称或 GitHub 仓库语言。每个项目需要同时保存：
+
+- 主分类：例如 AI 工具、桌面工具、浏览器工具、开发工具、自动化、Self-hosted、隐私安全、Android FOSS、文件与效率、媒体处理等；
+- 使用场景：例如“整理文件”“自己部署服务”“接入 API”“管理服务器”“处理图片”；
+- 项目形态：应用、库、框架、命令行工具、插件、Skill、MCP、服务、资源列表；
+- 质量和状态：待分析、已分析、可推荐、已看过、暂不推荐、疑似重复；
+- 来源权重：GitHub 直接发现、用户 Star、Telegram 频道、相似项目、手动链接。
+
+一两千个项目不能一次性加载到首页。推荐流需要分页或持续刷，每批从已分析项目中取一部分，同时保留“探索”和“继续加载”。推送任务应从分类、用户兴趣、项目新鲜度和来源可信度中生成，而不是把全部新项目一次发送。分类服务于后台整理、筛选和推送，不能把界面做成分类目录或新闻后台。
+
+内容生成必须经过统一模板和去重层：频道原文、GitHub README 和英文描述只作为输入，不能直接混在卡片里。DeepSeek 负责翻译、提炼、分类和比较，规则层负责字段校验、广告过滤、重复合并和推荐状态。
+
 ---
 
 ## 3. 当前完成情况总览
@@ -160,13 +185,17 @@ OpenRadar Personal 不是一个 GitHub 热榜，也不是新闻聚合站。
 - [x] 统一来源登记表 `/api/sources`。
 - [x] Telegram 个人账号 QR 登录基础骨架。
 - [x] Telegram 会话本地加密保存和断开连接接口。
+- [x] Telegram 公开频道网页读取脚本 `scripts/telegram-public-reader.mjs`：读取 `t.me/s/<频道>`、分页、提取正文/时间/浏览量/图片/链接并输出 JSON；Windows 下 Node 网络失败时回退系统 `curl.exe`。
+- [x] Telegram 公开频道连接器 `server/connectors/telegram-public.ts`：频道配置、消息 ID 增量读取、GitHub 链接提取、仓库元数据补充、候选池接入和状态文件。
+- [x] Telegram 公开频道接口与页面入口：`/api/telegram/public/status`、`PUT /api/telegram/public/channels`、`POST /api/telegram/public/sync`；弹窗可粘贴多条频道链接并手动同步。
+- [x] Telegram 公开频道每天最多一次的本地调度：默认 24 小时；首次同步必须手动触发，完成过一次后服务重启若到期才补跑；没有频道配置时不运行。
 - [x] 移动端样式、焦点状态和基本键盘可访问性。
 - [x] 统一候选 `Candidate` 与来源连接器接口 `SourceConnector`。
 - [x] GitHub 连接器 `server/connectors/github.ts`；探索路由改为调用连接器，不再直接写抓取逻辑。
 - [x] 候选池 `server/candidates.ts`：canonical URL 归一化 + 同批与跨批去重。
 - [x] `GET /api/candidates` 查看候选池状态；`/api/sources` 附带连接器自检结果。
 - [x] 卡片由候选反向渲染（`candidateToTool`），不再直接依赖原始 API 响应。
-- [x] `npm run check` 自检：候选池 19 项 + 评分 44 项离线用例。
+- [x] `npm run check` 自检：候选池 19 项 + 评分 44 项 + 分析队列 40 项离线用例。
 - [x] Git 仓库与远端 `git@github.com:beiming183-cloud/github-tuisong.git`。
 - [x] 修复 Vite 只监听 `::1`、导致 `http://127.0.0.1:5173/` 打不开且 OAuth 回调失败的问题。
 - [x] 行为事件记录 `server/events.ts`：view / like / save / star / compare / similar / skip / dismiss，写入 `data/events.json`（原子写 + 0o600）。
@@ -177,39 +206,46 @@ OpenRadar Personal 不是一个 GitHub 热榜，也不是新闻聚合站。
 - [x] `POST /api/events`、`GET /api/profile`、`GET /api/events`。
 - [x] 前端上报真实行为；卡片「为什么给你看」改为评分算出的理由；详情弹窗展示「这张卡片是怎么来的」。
 - [x] 「我的兴趣」画像弹窗；兴趣标签不再由抓取内容决定，只由真实行为决定。
-- [x] `npm run smoke`：接口级冒烟测试（24 项，可重复运行）。
-- [x] README 更新到 V0.5 实际状态：校验命令、推荐公式、数据与隐私说明。
+- [x] `npm run smoke`：接口级冒烟测试（32 项通过 + 2 项如实 SKIP），带「未隔离就拒绝执行」的硬门禁。
+- [x] `server/analysis.ts` 分析队列：批次有界（默认 6 / 上限 8）、可续跑、默认 dryRun、分析器可注入。
+- [x] `GET /api/analysis/status`、`POST /api/analysis/run`；`server/check-analysis.ts` 40 项离线用例。
+- [x] GitHub 限流识别：`githubRequest` 读取剩余额度与重置时间；回填遇限流提前停止，不再把限流算成失败。
+- [x] 修复 `ready` 覆盖 `analyzed` 的状态降级，和 Telegram 候选 AI 结果写不回候选池的问题。
+- [x] 修复 `OPENRADAR_DATA_DIR` 隔离失效：所有模块统一用 `store.ts` 的 `resolveDataDir()`；`/api/health` 暴露 `isolated`。
+- [x] README 更新到 V0.6 实际状态：公开频道来源、校验命令、推荐公式、数据与隐私说明。
 - [x] `npm run build` 通过。
 - [x] `npm run lint` 通过。
 
 ### 3.2 已有但不完整
 
-- [ ] `interestTags` 现在由真实行为画像驱动，但只在有 ≥2 个正向标签时才替换占位标签，没有画像时仍显示默认文案。
-- [x] 推荐排序已经不再只依赖来源返回顺序：候选池参与评分、硬规则降权和多样性重排。
-- [ ] 候选池和事件都只在内存 + 单个 JSON 文件里，API 进程重启后候选池清空（事件会保留）。
-- [ ] 事件文件每来一批就整文件重写，没有按用户或按天分片；事件超过 5000 条会丢弃最早的。
-- [ ] 「取消喜欢 / 取消收藏」目前不产生任何事件，负向信号只有「跳过」和「不再推荐」。
-- [ ] 评分里没有使用「近期 Star 增长」「Issue 活跃度」「安装复杂度」这些信号，只有星数量级和更新时间。
-- [ ] 去重目前是 URL 级，还没有做标题、描述、标签的语义合并。
-- [ ] GitHub 的分类目前是关键词启发式，不是成熟的相关度模型。
-- [ ] DeepSeek 只负责补中文卡片字段，没有缓存、成本统计、版本化和人工纠错。
-- [x] `rss` 曾在来源登记表中虚标为 ready，已改为 coming_soon 并写明“目前还没有抓取代码”。
-- [ ] Telegram 可以生成登录二维码的代码，但当前没有配置 Telegram API ID/API Hash，也没有频道消息抓取。
-- [ ] 推荐流没有真正的数据库，换浏览器后行为画像不会跨设备同步（同一台机器上换浏览器是可以的，画像在服务端）。
-- [ ] 暂无定时任务、后台抓取队列或自动推送。
+**2026-09-29 整理**：这一节原来混着一批已经完成却还挂在「不完整」里的条目（SQLite 持久化、分页、DeepSeek 缓存、画像查看），会让人误判项目进度。已按当前代码逐条核对重写。
+
+- [ ] `interestTags` 由真实行为画像驱动，但只在有 ≥2 个正向标签时才替换占位标签；没有画像时仍显示默认文案。
+- [ ] **分析队列从未对真实 DeepSeek 跑过一次**（本机没有 Key）。队列逻辑有 40 项离线用例覆盖，但「真的连上会不会按预期写回」未验证。当前 99 个候选、已分析 0 个。
+- [ ] 「取消喜欢 / 取消收藏」不产生任何事件，负向信号只有「跳过」和「不再推荐」。
+- [ ] 评分只用「星数量级 + 更新时间 + 有无描述/topics」，没有近期 Star 增长、Issue 活跃度、安装复杂度。
+- [ ] 去重只做 URL 级，没有标题 / 描述 / 标签的语义合并。
+- [ ] GitHub 分类是关键词启发式，不是相关度模型。
+- [ ] DeepSeek 结果按输入哈希缓存，但**没有成本统计、Prompt 版本号和人工纠错**。
+- [ ] 事件上限 5000 条，超出丢弃最早的；没有按用户或按天分片。
+- [ ] Telegram 个人账号登录仍未配置 API ID/API Hash；公开频道路线已接入候选池和推荐排序，但只处理公开网页能看到的内容。
+- [ ] 公开频道只有「每天最多一次」的本地调度，没有失败重试队列。
+- [ ] 比较结果没有持久化；比较结论仍是规则优先「上手低」。
+- [ ] 前端按钮选中态仍存在 `localStorage`，与事件记录是两套，可能出现「按钮亮着但画像里没有这条」。
+- [x] 推荐排序不再只依赖来源返回顺序：候选池参与评分、硬规则降权和多样性重排。
+- [x] 候选池、事件、暂存、AI 缓存已落到 `data/openradar.sqlite`（`server/store.ts`），启动时从旧 JSON 迁移。
+- [x] `rss` 曾在来源登记表中虚标为 ready，已改为 coming_soon 并写明「目前还没有抓取代码」。
 
 ### 3.3 尚未开始
 
-- [ ] Telegram 频道/资源群配置页面。
-- [ ] Telegram 公开频道消息读取、链接抽取、去重和卡片生成。
+- [ ] Telegram 初次历史回看策略（先 100～200 条，消息多的频道允许扩大到 500+）还没有正式跑。
+- [ ] 来源级「少量先看 / 大量先暂存 / 用户不感兴趣后不再推荐」策略。
 - [ ] RSS、Hacker News、Product Hunt 等来源连接器（接口已就绪，见第 12 节）。
-- [ ] 内容规范化（标题、描述、标签的语义合并），现在只做了 URL 级去重。
-- [ ] 无限滚动或分页式“继续刷”。
-- [ ] 真实的跳过与不再推荐入口的移动端位置验证。
-- [ ] SQLite 或其他轻量持久化存储。
-- [ ] 推荐解释、用户画像查看和可编辑偏好。
-- [ ] Docker、云部署、自动化运行和通知推送。
+- [ ] 推送任务：按分类、兴趣、新鲜度和来源可信度生成摘要，而不是把新项目一次全推。
 - [ ] 图片、频道截图、帖子媒体的稳健提取。
+- [ ] Docker、云部署、自动化运行。
+- [ ] 多用户、权限与隐私设置。
+- [ ] **浏览器手动验证**：第 5.4 节的清单至今没有任何人执行过，所有验证都停在接口层。
 
 ---
 
@@ -365,16 +401,17 @@ npm run lint
 
 `npm run build` 包含服务端 TypeScript 检查、客户端 TypeScript 构建和 Vite 生产构建。
 
-`npm run check` 运行两个纯离线自检，覆盖 canonicalUrl 归一化、候选池同批与跨批去重、候选到卡片的往返渲染、兴趣画像加权、六个评分维度、硬规则降权和多样性重排。它不联网、不读 `.env`、不写 `data/`，改动连接器、去重、事件权重或评分逻辑后必须运行。
+`npm run check` 运行**三套**纯离线自检：候选池（`check-connectors.ts`，19 项）、评分（`check-recommend.ts`，44 项）、分析队列（`check-analysis.ts`，40 项），合计 103 项。覆盖 canonicalUrl 归一化、跨批去重、候选到卡片往返、兴趣画像加权、六个评分维度、硬规则降权、多样性重排、状态单向合并、分析队列的批次/续跑/dryRun/错误处理。它不联网、不读 `.env`、不写 `data/`，改动连接器、去重、事件权重、评分或分析逻辑后必须运行。
 
 `npm run smoke` 是接口级冒烟测试，需要一个已经跑起来的 API：
 
 ```powershell
 npm run smoke                          # 默认打 http://127.0.0.1:8787
 npm run smoke -- http://127.0.0.1:8799 # 或指定地址
+npm run smoke -- --force               # 明知没隔离也要跑（会污染真实数据）
 ```
 
-它会真实抓一次 GitHub、真的写行为事件，所以**跑之前请把 API 的 `OPENRADAR_DATA_DIR` 指到临时目录**，否则测试数据会混进你自己的兴趣画像：
+它会真实抓一次 GitHub、真的往候选池和行为事件里写东西。**它现在有硬门禁**：目标实例的 `/api/health` 报 `isolated: false` 时直接拒绝执行（退出码 2）并打印正确用法。所以正确流程是先把数据目录隔离再起服务：
 
 ```powershell
 $env:PORT='8799'; $env:OPENRADAR_DATA_DIR="$env:TEMP\openradar-smoke-data"
@@ -383,7 +420,9 @@ npm run start
 npm run smoke -- http://127.0.0.1:8799
 ```
 
-冒烟测试比对的是「本次新增的差值」而不是绝对值，所以可以重复运行而结果稳定。`OPENRADAR_DATA_DIR` **只被 `server/events.ts` 识别**（会话密钥和 Telegram 会话不认），它的唯一用途就是隔离行为事件，不是通用的数据目录开关。
+冒烟测试比对的是「本次新增的差值」而不是绝对值，所以可以重复运行而结果稳定。
+
+`OPENRADAR_DATA_DIR` 现在是**全模块生效**的通用数据目录开关（`server/store.ts` 的 `resolveDataDir()` 是唯一来源），候选池、行为事件、暂存区、GitHub 会话、Telegram 状态都会跟着走。这一点在 2026-09-29 之前是坏的，见 17.8 节。
 
 ### 5.4 手动验证清单
 
@@ -411,26 +450,26 @@ npm run smoke -- http://127.0.0.1:8799
 
 ### 5.5 当前已知验证结果
 
-最近一次（行为事件与可解释评分落地后）在本机实测：
+最近一次（分析队列、限流回填与隔离修复之后）在本机实测：
 
 - `npm run build`：通过。
-- `npm run lint`：通过（0 warning / 0 error，22 个文件）。
-- `npm run check`：候选池 19 项 + 评分 44 项，全部通过（合计 63 项）。
-- `npm run smoke`：24 项通过、1 项 SKIP（池里只有一个来源时来源多样性无法满足），连续跑两次结果一致。
-- `/api/health`：`{"ok":true,"service":"openradar-api"}`。
-- `/api/sources`：返回 7 条来源描述，并附带 `connectors` 自检结果（`github-discovery: ready`）。
-- `/api/candidates`：空池时返回 `{"stats":{"size":0,...},"items":[]}`。
+- `npm run lint`：通过（0 warning / 0 error，27 个文件）。
+- `npm run check`：三套离线用例全部通过 —— 候选池 19 项 + 评分 44 项 + 分析队列 40 项（合计 103 项）。
+- `npm run smoke`：32 项通过、2 项 SKIP、0 失败。两个 SKIP 都是如实跳过：候选池只有一个来源时无法验证来源多样性；没有 `DEEPSEEK_API_KEY` 时无法验证真实分析写回。
+- **隔离门禁实测**：对未隔离的实例跑 `npm run smoke` 会以退出码 2 拒绝执行并打印正确用法；对设了 `OPENRADAR_DATA_DIR` 的实例正常跑完。
+- **隔离修复实测**：修复前，隔离实例报出真实数据的 99 个候选；修复后隔离实例报 0 个候选，写入只落在临时目录，真实库在测试前后保持 `99 候选 / 1 事件` 不变。
+- `/api/health`：返回 `{ ok, service, isolated }`。
+- `/api/analysis/status`：真实数据下报告 `total=99, analyzed=0, needsAnalysis=99`，其中 telegram 53 / github 46。
+- `/api/analysis/run`：不传 `dryRun` 时返回 `dryRun: true, applied: 0`，不写任何数据。
+- `/api/sources`：返回 7 条来源描述，并附带 `connectors` 自检结果。
 - `/api/profile`：没有行为时 `hasProfile=false`，明确说明“还没有足够的偏好信号”。
-- `/api/events`：5 条合法事件全部入库；`{toolId:'', event:'like'}` 与非法事件名被跳过而不是整批失败（`stored=0, rejected=2`）。
-- 兴趣画像加权实测：`文件工具 = 11`（save 4 + save 4 + like 3）、`本地运行 = 4`、`AI 工具 = -2`（skip），正向 3 次 / 负向 2 次。
-- `/api/recommend`：第一张是全局最高分；12 张里 3 对相邻位置为多样性做了交换；同标签最长连续 2 张。
-- `/api/discover/github`：返回 24 个项目，`pool.size=24, added=24, duplicates=0`；同参数再请求一次为 `added=0, duplicates=24`；换成 `q=stars:>20000` 为 `added=20, duplicates=4`。
-- 手动丢链接：`https://github.com/qarmin/czkawka/tree/master` 与 `https://www.github.com/Qarmin/Czkawka.git` 归一化为同一条候选，第二次为 `added=0, duplicates=1`。
-- 地址验证：`http://127.0.0.1:5173/` 与 `http://localhost:5173/` 均返回 200，Vite 的 `/api` 代理正常。
-- Telegram 当前 `/api/telegram/config`：`configured: false`，因为尚未成功获得 API ID/API Hash。
-- DeepSeek 当前未配置 Key，规则结果可用。
+- 兴趣画像加权：`文件工具 = 11`（save 4 + save 4 + like 3）、`本地运行 = 4`、`AI 工具 = -2`（skip）。
+- `/api/recommend`：第一张是全局最高分；同标签最长连续 2 张。
+- `/api/discover/github`：返回 24 个候选，重复请求 `added=0`。
+- Telegram 个人账号：`/api/telegram/config` 仍是 `configured: false`（没有 API ID/API Hash）；公开频道路线可用且已接入候选池。
+- DeepSeek：未配置 Key。
 
-**尚未完成**：浏览器手动验证。本轮改动只做了接口级冒烟测试，还没有在浏览器里点过「探索」「跳过」和画像弹窗，下一位接手时请补上第 5.4 节的手动清单。
+**尚未完成**：真实 DeepSeek 分析一次都没跑过；浏览器手动验证也没做过（第 5.4 节的清单至今无人执行）。所有验证都停在接口层。
 
 ---
 
@@ -595,8 +634,12 @@ type Tool = {
 返回：
 
 ```json
-{ "ok": true, "service": "openradar-api" }
+{ "ok": true, "service": "openradar-api", "isolated": false }
 ```
+
+`isolated` 表示这个实例是否跑在隔离数据目录里（设了 `OPENRADAR_DATA_DIR`）。
+
+**`npm run smoke` 会用它当硬门禁**：`isolated: false` 时直接拒绝执行，因为冒烟脚本会真的往候选池和行为事件里写测试数据。这条规则是一次真实事故换来的，见 17.8 节。
 
 #### `GET /api/sources`
 
@@ -609,7 +652,8 @@ type Tool = {
 | `rss` | RSS / 网站 | coming_soon | 接口已就绪但没有抓取代码，已从虚标的 ready 改正 |
 | `hacker-news` | Hacker News | coming_soon | 尚未实现 |
 | `product-hunt` | Product Hunt | needs_config | 需要 API 配置 |
-| `telegram` | 纸飞机频道 / 资源群 | needs_config | QR 连接骨架，频道抓取未实现 |
+| `telegram` | 纸飞机频道 / 资源群 | needs_config | 个人账号 QR 连接骨架，需要 API ID/API Hash |
+| `telegram-public` | 纸飞机公开频道 | needs_config | 公开网页读取连接器；配置频道后 ready，不需要 Telegram API |
 | `manual` | 我丢一个链接 | ready | GitHub 链接已实现 |
 
 #### `GET /api/candidates?limit=<1-100>`
@@ -716,7 +760,58 @@ type Tool = {
 - 同来源连续不超过 2 张，只在候选池里有 ≥2 个来源时才要求。目前只有 GitHub 探索一个连接器，所以实际的推荐结果全部同来源，这条规则会自动放宽（`diversify` 的 `relaxSource`），不会假装满足。
 - 跳过过的项目乘 0.5，标记不再推荐的乘 0.1，但**两者都仍然会返回**，不永久隐藏。
 
-### 8.3 AI
+### 8.3 分析队列（2026-09-29 新增）
+
+候选池有积压时，不能用一次请求把上千条送给 DeepSeek。分析队列把这件事拆成有界、可续跑、可干跑的三步。
+
+#### `GET /api/analysis/status`
+
+只读，不发任何请求。`configured: false` 时**仍然**会列出 `nextBatch`，方便先看清工作量再决定要不要配 Key。
+
+```json
+{
+  "configured": false,
+  "provider": "deepseek",
+  "model": "deepseek-chat",
+  "backlog": {
+    "total": 99, "analyzed": 0, "needsAnalysis": 99, "notEligible": 0,
+    "bySourceKind": { "telegram": { "total": 53, "analyzed": 0, "needsAnalysis": 53 } }
+  },
+  "nextBatch": [
+    { "id": "telegram-code_stars-16051-1338539251", "title": "whiteboard", "sourceKind": "telegram", "sourceId": "telegram-public:code_stars" }
+  ]
+}
+```
+
+#### `POST /api/analysis/run`
+
+请求体：`{ "limit"?: 1-8, "dryRun"?: boolean }`。
+
+**默认 `dryRun: true`** —— 必须显式传 `"dryRun": false` 才会真的调用 DeepSeek 并写回。误触接口不应该消耗额度或改数据。
+
+```json
+{
+  "configured": true, "dryRun": false,
+  "attempted": 6, "applied": 6, "unmatched": 0, "skipped": 0,
+  "remaining": 93, "batchSizeLimit": 6,
+  "ids": ["github-123", "telegram-..."],
+  "error": "可选：调用失败时的中文原因"
+}
+```
+
+状态约定（`server/analysis.ts`，由 `server/check-analysis.ts` 的 40 项用例覆盖）：
+
+| 情况 | 行为 |
+|---|---|
+| 拿到 AI 结果 | 写回 `metadata.aiPatch` + `metadata.analyzedAt`，状态置 `analyzed` |
+| 调用成功但某条没返回结果 | 也标记 `analyzed`（记 `analysisSkipped`），否则它会永远堵在队首 |
+| 调用抛错 | **什么都不标记**，整批留给下次重试 |
+| 没有配置 DeepSeek | **什么都不标记**，只报告 `configured: false` |
+| `dryRun` | 只列出 `ids`，不改任何数据 |
+
+「已分析」判定看 `metadata.analyzedAt`（或旧数据的 `metadata.aiPatch`），而不是只看 `status`——因为 `status` 会被连接器的重新同步影响。
+
+### 8.4 AI
 
 #### `GET /api/ai/config`
 
@@ -763,7 +858,7 @@ id, title, summary, why, tags, fit, difficulty, value
 
 没有 Key 时返回 `configured: false, patches: []`，前端继续使用本地规则结果。
 
-### 8.4 GitHub
+### 8.5 GitHub
 
 #### `GET /api/github/config`
 
@@ -848,7 +943,7 @@ id, title, summary, why, tags, fit, difficulty, value
 - 删除本地服务端会话。
 - 清理 Cookie。
 
-### 8.5 Telegram
+### 8.6 Telegram
 
 #### `GET /api/telegram/config`
 
@@ -882,7 +977,7 @@ id, title, summary, why, tags, fit, difficulty, value
 - 断开活动客户端。
 - 清除内存状态和加密会话文件。
 
-### 8.6 API 错误约定
+### 8.7 API 错误约定
 
 服务端错误处理中会返回：
 
@@ -1033,7 +1128,7 @@ Telegram 官方文档说明需要在 API development tools 获得 API ID 和 API
 
 ### 11.4 Telegram 频道接入的下一步设计
 
-建议不要一上来抓全量频道。先设计一个“我的来源”配置：
+不要一上来抓全量频道。当前已经落地“我的公开来源”配置，运行时文件为 `data/telegram-web/channels.json`：
 
 ```text
 来源名称
@@ -1045,17 +1140,17 @@ Telegram 官方文档说明需要在 API development tools 获得 API ID 和 API
 最后抓取时间
 ```
 
-建议只接入公开频道或用户明确授权的群组，第一版只读取文本和公开链接：
+当前公开网页路线只接入公开频道，第一版只读取文本和公开链接：
 
-1. 解析频道用户名/链接。
-2. 使用 GramJS 获取最近 N 条消息。
-3. 提取 GitHub、工具官网、Product Hunt 等 URL。
-4. 用 canonical URL 去重。
-5. 记录原始来源频道、消息 ID、发布时间。
-6. 将链接转换为统一 `Candidate`。
-7. 调用 GitHub/网页元数据抓取。
-8. 用 DeepSeek 生成中文卡片。
-9. 放入候选池，而不是直接覆盖推荐流。
+1. 解析频道用户名/链接，去重后保存配置。
+2. 使用 `https://t.me/s/<频道>` 公开网页预览；不使用 API、Cookie 或登录会话。
+3. 以 `data/telegram-web/state.json` 中的 `lastMessageId` 为游标，只读取新增消息。
+4. 提取 GitHub URL，兼容正文单独成行的 `owner/repo` 写法；V0.6 先把 GitHub 作为可渲染候选，非 GitHub 链接暂存为后续扩展。
+5. 用 canonical URL 去重；相同仓库从多个频道或 GitHub 发现时合并来源记录。
+6. 记录原始来源频道、消息 ID、发布时间、浏览量、图片和原文。
+7. 调用 GitHub 元数据抓取，转换成统一 `Candidate`；候选的 `sourceKind` 为 `telegram`，`sourceId` 为 `telegram-public:<username>`。
+8. 放入候选池，走现有推荐评分；DeepSeek 通过现有 `/api/ai/enrich` 按需补中文卡片，不把 AI 调用写死在抓取循环中。
+9. 手动同步和本地调度共用同一套函数，默认 24 小时最多一次；服务器重启时只在到期后补跑。
 
 建议的数据字段：
 
@@ -1072,6 +1167,37 @@ type SourceMessage = {
 }
 ```
 
+### 11.5 公开网页读取路线（已实现）
+
+由于 Telegram 应用创建页面暂时无法生成 API ID/API Hash，项目先增加了不需要登录的公开频道路线：
+
+```powershell
+npm run telegram:read -- @telegram --limit 20
+```
+
+实现文件：
+
+- `scripts/telegram-public-reader.mjs`
+- `server/connectors/telegram-public.ts`
+- `docs/telegram-web-reader.md`
+- `package.json` 中的 `telegram:read` 脚本
+
+读取内容来自 Telegram 的公开网页预览 `https://t.me/s/<channel>`，不读取浏览器 Cookie，不读取私有频道。输出结构已经包含 `channel`、`messages`、消息链接、时间、正文、图片、浏览量和正文中出现的外部链接，默认保存到 `data/telegram-web/<channel>.json`。
+
+脚本仍然只负责一次性导出 JSON；正式服务路径由 `server/connectors/telegram-public.ts` 负责。当前真实验证过 `@telegram` 和 `@GithubCOTV`；后者是“极客资源仓库”，可以读取正文、图片和浏览量，并把正文中单独成行的 `owner/repo` 自动补成 GitHub 仓库 URL。分页读取 25 条也已验证成功。
+
+用户在 `C:\Users\rog\Desktop\频道.txt` 提供了一批频道链接，后续又补充了一批英文和 FOSS / Self-hosted 频道，当前运行配置共 41 个用户名。新增频道按四组记录：`radar`（GitHub 大范围雷达）、`curated`（人工筛选项目）、`selfHosted`（可自托管和 Homelab）、`fossMedia`（FOSS / Linux / Android 媒体）。**只写入配置，没有启动几百条历史回看。** 后续首次回看策略：默认先取 100～200 条；消息密集的频道可人工提高到 500 或更多；消息少的频道只取最近十几条并交给去重层。这个策略要等候选池持久化后再做，不要把几百条原始消息直接塞进首页。
+
+当前服务接口：
+
+```text
+GET  /api/telegram/public/status
+PUT  /api/telegram/public/channels  { channels: string[] }
+POST /api/telegram/public/sync      { channels?: string[], limit?: number, pages?: number }
+```
+
+公开频道只是补充来源。GitHub 公开搜索、用户 Star 和未来的开源目录仍是主体；频道里的介绍文案可以帮助 DeepSeek 理解“这个工具解决什么问题”，但不能把频道的 Star、夸张描述直接当成事实。
+
 ---
 
 ## 12. 来源连接器的统一接口（已落地）
@@ -1083,7 +1209,8 @@ server/connectors/
 ├── types.ts            # 已存在：Candidate / SourceConnector / ToolCard
 ├── index.ts            # 已存在：连接器注册表与自检汇总
 ├── github.ts           # 已存在：参考实现
-├── telegram.ts         # 待建
+├── telegram-public.ts  # 已存在：公开频道网页、增量游标和候选转换
+├── telegram.ts         # 已存在：个人账号 QR 登录代理（需要 API ID/API Hash）
 ├── rss.ts              # 待建
 ├── hackerNews.ts       # 待建
 └── productHunt.ts      # 待建
@@ -1461,13 +1588,15 @@ dismiss    -4
 3. [x] 增加 `view / like / save / star / compare / similar / skip / dismiss` 行为事件。（2026-09-28 完成，写入 `data/events.json`）
 4. [x] 做第一版可解释的兴趣评分，并在卡片和详情里展示理由。（2026-09-28 完成）
 5. [x] 让候选池真正参与排序与多样性重排。（2026-09-28 完成，见 `GET /api/recommend`）
-6. [ ] 让“继续刷”能够加载下一批结果，并把候选池从内存换成 SQLite。
+6. [x] 让“继续刷”能够加载下一批结果，并把候选池从内存换成 SQLite。（2026-09-29 完成第一版，`GET /api/feed` + `data/openradar.sqlite`）
 
-P0 剩下的第 6 项是下一步最该做的：现在候选池每重启一次就清空，「继续刷」也还没有分页游标（`SourceConnector.fetchCandidates` 已经预留了 `cursor`/`nextCursor`，但只有 GitHub 连接器还没用它）。
+P0 的六项都完成了。下一步是 **P0-7：把积压真正分析完**——分析队列（`server/analysis.ts`）和接口都已经写好并通过 40 项离线用例，但**一次真实 DeepSeek 调用都没跑过**，因为本机没有 `DEEPSEEK_API_KEY`。现在候选池 99 个、已分析 0 个。
 
-**开工前先看这条**：本机 Node 是 `v24.11.1`，内置的 `node:sqlite` 可用（`DatabaseSync` / `StatementSync`）。所以候选池和事件**不需要引入 `better-sqlite3` 之类的原生依赖**就能落到 SQLite，对本地私人工具来说省掉了原生编译和一条供应链。代价是 Node 目前仍把 `node:sqlite` 标为 experimental（启动时会有 `ExperimentalWarning`），API 未来可能变。建议做法：把 SQLite 访问全部关在 `server/store.ts` 一个文件里，连接器、评分和路由都只调它的函数，这样万一要换回 JSON 或换库，改动面只有一个文件。
+配好 Key 后的顺序：先 `GET /api/analysis/status` 看清工作量 → `POST /api/analysis/run`（不传 `dryRun`，默认就是计划模式）看它会处理哪些 → 传 `"dryRun": false, "limit": 2` 小批试跑，确认写回和缓存都对 → 再逐步放量。**不要一次把 99 个甚至上千条送出去。**
 
-迁移时注意：`server/events.ts` 里 `OPENRADAR_DATA_DIR` 的语义要在新存储里保留，否则 `npm run smoke` 的隔离机制会失效，测试数据会写进用户真实画像。
+**开工前先看这条**：本机 Node 是 `v24.11.1`，内置的 `node:sqlite` 可用（`DatabaseSync` / `StatementSync`）。所以持久化**不需要引入 `better-sqlite3` 之类的原生依赖**。代价是 Node 目前仍把 `node:sqlite` 标为 experimental（启动时会有 `ExperimentalWarning`），API 未来可能变。已经按这个建议把数据库访问全部收在 `server/store.ts`，换库只改一个文件。
+
+**数据目录规则（2026-09-29 修正）**：所有模块必须用 `server/store.ts` 导出的 `resolveDataDir()`，**不要自己拼 `path.join(projectDir, 'data')`**。曾经有四个模块各写一份硬编码路径，导致 `OPENRADAR_DATA_DIR` 隔离形同虚设，详见 17.8 节。
 
 ### P1：把信息源做成真正可扩展的系统
 
@@ -1562,7 +1691,33 @@ P0 剩下的第 6 项是下一步最该做的：现在候选池每重启一次�
 - **事件文件是隐私数据。** `data/events.json` 记录用户看过什么、跳过什么。它已被 `.gitignore` 整目录忽略，接口也不返回内部 id。新增接口时不要顺手把它暴露出去。
 - **事件会无限增长。** 目前超过 5000 条丢最早的，且每批都整文件重写。事件多了以后写入会变慢，换 SQLite 时先处理这个。
 - **`interestTags` 和 localStorage 可能不一致。** 按钮选中态看 localStorage，排序看事件。用户手改 localStorage 或换浏览器后，会出现「按钮亮着但画像里没有这条」的情况。
-- **`npm run smoke` 会真的写事件。** 直接打真实实例会污染用户画像（本轮开发就发生过一次，已清理）。跑之前必须设置 `OPENRADAR_DATA_DIR` 到临时目录。
+- **`npm run smoke` 会真的写候选池和事件。** 它现在有硬门禁：目标实例 `health.isolated` 为 false 时直接拒绝执行（退出码 2）。要打真实实例必须显式加 `--force`。
+
+### 17.8 测试隔离事故：以为隔离了，其实没有（2026-09-29）
+
+这是本项目到目前为止最值得记住的一个坑。
+
+**症状**：用 `OPENRADAR_DATA_DIR` 指向临时目录启动 API，`/api/analysis/status` 却报告真实数据的 99 个候选；临时目录里只留下一个 45KB、表全空的 `openradar.sqlite`。
+
+**根因**：只有 `server/store.ts` 认 `OPENRADAR_DATA_DIR`，而 `index.ts`、`staging.ts`、`telegram.ts`、`telegram-public.ts` 各自硬编码了 `path.join(projectDir, 'data')`。`index.ts` 又用这个硬编码路径去调 `enableCandidatePersistence(data/candidates.json)`，于是候选池、GitHub 会话、Telegram 状态全部指向真实数据。那个 45KB 的空库是某个模块提前懒加载 `db()` 时按环境变量建出来的，随后就被 `configureStore()` 切走了——所以**看起来**临时目录里有库，实际上一次都没用上。
+
+**实际损失**（都已确认）：
+
+- 真实候选池里 46 个 `github-discovery` 候选全部来自测试跑（时间戳 01:01Z 与 01:56Z 两次，正好对应两次冒烟）。
+- 真实事件表 11 条里有 10 条是 `smoke-*` 测试事件，它们会真实影响兴趣画像和推荐排序。**已删除这 10 条**（你唯一的一条真实 `like` 保留）。清理前的库备份在 `%TEMP%\openradar-backup-before-clean.sqlite`。
+- 46 个候选**没有删**：它们是真实存在的仓库，属于这个产品本来就该积累的内容。
+
+**修复**：
+
+1. `server/store.ts` 导出唯一的 `resolveDataDir()`，所有模块都改用它，不再各自拼路径。
+2. `/api/health` 增加 `isolated` 字段。
+3. `npm run smoke` 在 `isolated: false` 时拒绝执行。
+
+**教训**：
+
+- 隔离只有在**所有**读写路径都遵守它时才算隔离。一个模块漏掉，整套隔离就是假的，而且失败方式非常隐蔽——它不会报错，只会安静地写错地方。
+- 声明「用环境变量隔离测试数据」之后，必须**实际验证**：起一个隔离实例，看它读到的数据是不是空的，再对比真实数据有没有变化。本轮就是靠对比真实库的 `99/11` 前后一致才确认修复生效。
+- 任何会写数据的测试脚本，都应该自己带上「目标不对就拒绝跑」的门禁，而不是依赖操作者记得设环境变量。
 
 ---
 
@@ -1597,14 +1752,15 @@ P0 剩下的第 6 项是下一步最该做的：现在候选池每重启一次�
 1. 先读本文，不要立即重写页面。
 2. 检查 `D:\Codex\Projects\openradar-personal` 是否存在，并 `git pull --ff-only` 确认基线干净。
 3. 运行 `npm install`（如果 `node_modules` 不存在）。
-4. 运行 `npm run build`、`npm run lint` 和 `npm run check`，确认基线。
-5. 检查 `/api/health`、`/api/sources`、`/api/candidates`、`/api/profile`、`/api/recommend` 和 `/api/ai/config`。
-6. 不读取或打印 `.env` 的真实值；也不要把 `data/events.json` 的内容贴到任何地方。
-7. 跑 `npm run smoke` 之前，**先把 API 的 `OPENRADAR_DATA_DIR` 指到临时目录**，否则会污染用户真实画像。
-8. 看清用户当前优先级：个人工具发现、中文、简单、视觉化、可持续推荐。
+4. 运行 `npm run build`、`npm run lint` 和 `npm run check`（三套共 103 项离线用例），确认基线。
+5. 检查 `/api/health`、`/api/sources`、`/api/candidates`、`/api/analysis/status`、`/api/profile`、`/api/feed` 和 `/api/ai/config`。
+6. 不读取或打印 `.env` 的真实值；也不要读或粘贴 `data/` 下任何文件（`openradar.sqlite` 里有行为事件和频道原文）。
+7. 跑 `npm run smoke` 前先把数据目录隔离（`$env:OPENRADAR_DATA_DIR`）。脚本会自己检查并拒绝打未隔离的实例，但**不要因此依赖它**——先隔离再跑才是正常姿势。
+8. 看清用户当前优先级：个人工具发现、中文、简单、视觉化、可持续推荐；后台可以积累一两千个项目，但首页只展示当前最值得看的一批。
 9. 如果任务涉及新来源，先设计 Candidate 和去重字段，再写抓取代码；接口和参考实现都已经在 `server/connectors/`。
-10. 如果任务涉及 UI，先保持“频道编辑流”方向，不要改成后台仪表盘。
-11. 完成后更新本文第 3 节、第 16 节和第 20 节。
+10. 如果任务涉及数据目录或持久化，先读 17.8 节，不要新增第二份数据路径计算。
+11. 如果任务涉及 UI，先保持“频道编辑流”方向，不要改成后台仪表盘。
+12. 完成后更新本文第 3 节、第 16 节和第 20.5 节。
 
 ---
 
@@ -1636,7 +1792,36 @@ DeepSeek 用来分析、改写、匹配和比较；被推荐的项目不需要�
 
 ### 2026-09-28：Telegram 策略
 
-先把个人账号 QR 登录骨架接好；由于 Telegram 创建 API 应用页面出现外部 ERROR，暂缓真实连接和频道抓取，不用这个阻塞其他开发。
+个人账号 QR 登录仍保留为后续路线；由于 Telegram 创建 API 应用页面出现外部 ERROR，先采用不需要凭证的公开网页预览路线，不让外部阻塞拖住来源建设。
+
+### 2026-09-28：公开频道从脚本升级为正式补充来源
+
+用户提供了一批频道链接，希望 GitHub 和其他开源社区做主体、Telegram 频道做补充；系统不要一开始抓几百条把推荐流淹没，而是先保存来源，后续按频道消息量决定首次回看范围，并通过“新增消息游标 + URL 去重 + 候选池”慢慢积累。
+
+本轮实现：
+
+- `server/connectors/telegram-public.ts`：公开网页读取、分页、`lastMessageId` 增量状态、GitHub 链接抽取、仓库元数据补充、Candidate 转换。
+- `data/telegram-web/channels.json`：本机频道配置；已从桌面 `频道.txt` 和后续补充整理 41 个公开频道用户名，并按雷达、精选、Self-hosted、FOSS 媒体分组；没有自动执行大批量历史同步。
+- `data/telegram-web/state.json`：运行时游标和同步状态，整个 `data/` 不提交仓库。
+- `GET /api/telegram/public/status`、`PUT /api/telegram/public/channels`、`POST /api/telegram/public/sync`：配置、查看状态和手动同步。
+- `TelegramDialog` 增加“添加公开频道”区域；可以只保存而不读取，手动读取按钮按每频道最多 10 条执行；首次同步必须手动点击，之后自动调度默认每 24 小时最多一次，启动时仅在到期后补跑。
+- `server/check-connectors.ts` 增加 Telegram 纯函数解析用例；`npm run build`、`npm run lint`、`npm run check` 均通过。
+
+刻意没有做的事：没有读取私有聊天、没有读取浏览器 Cookie、没有自动回看五六百条、没有把频道的夸张文案当成事实、没有把非 GitHub 链接强行渲染成 GitHub 卡片。下一步应先做候选池持久化和“暂存区”，再实现按消息量分层的历史回看。
+
+### 2026-09-28：候选池先增加可恢复存储
+
+在正式批量抓取前，先把服务端候选池从“只存在内存”改为可恢复的本地 JSON：`server/index.ts` 启动时调用 `enableCandidatePersistence()` 读取 `data/candidates.json`，每次 `upsertCandidates` 后原子写回。`server/check-connectors.ts` 等离线检查不启用持久化，因此不会把测试候选写进用户数据。SQLite 仍是后续方向；下一步是在这个入口上增加原始消息表和暂存状态，而不是让批量抓取直接进入首页。
+
+### 2026-09-28：增加原始消息暂存区和广告过滤
+
+批量抓取前先建立 `server/staging.ts`。Telegram 新消息会先写入 `data/staging.json`，保留频道、消息 ID、原文、图片、浏览量和外链；只有非广告消息中的 GitHub 项目才进入候选池。VPN、机场、节点、优惠码、推广和赞助等常见广告模式标记为 `filtered`，不进入推荐。暂存状态为 `new / ready / dismissed / filtered`，接口为 `GET /api/staging` 和 `PATCH /api/staging/:id`。这是“批量读取不会直接污染首页”的第一版，后续再把暂存记录迁移到 SQLite，并接入 DeepSeek 分析队列。
+
+### 2026-09-29：首次 41 个频道批量读取
+
+按用户授权执行了首次分批读取：每个频道最多 100 条消息、最多 5 页，原始消息边读边写入暂存区。最终统计：41 个配置频道中 37 个成功读取，4 个没有公开网页预览（`heikeji_2025`、`xiaoshuwu`、`gitbig`、`watashinoAPPs`）；暂存 3227 条消息，其中 271 条被广告过滤，2956 条待处理；从首批可用 GitHub API 元数据中形成 53 个候选。
+
+暂存消息中目前有约 1543 个去重后的 GitHub 链接。后续补全候选时需要使用 GitHub 登录令牌或等待匿名 API 限流恢复；本次批量读取没有丢失这些链接，原文和链接都在 `data/staging.json`。这次统计应作为后续“项目补全 / DeepSeek 分析队列”的输入基线。
 
 ### 2026-09-28：Git 协作基线
 
@@ -1701,9 +1886,67 @@ DeepSeek 用来分析、改写、匹配和比较；被推荐的项目不需要�
 
 ### 2026-09-28：README 更新为项目入口
 
-仓库已经推到 GitHub，README 是第一个被看到的东西，而它当时还写着「V0.1 前端原型」和一份过时的功能清单。已更新到 V0.5 的实际状态，并补上校验命令、推荐公式和数据隐私说明。
+仓库已经推到 GitHub，README 是第一个被看到的东西，而它当时还写着「V0.1 前端原型」和一份过时的功能清单。已更新到 V0.6 的实际状态，并补上公开频道来源、校验命令、推荐公式和数据隐私说明。
+
+### 2026-09-29：分析队列落地，并修掉两个会让它失效的 bug
+
+**做了什么**：`server/analysis.ts` 把分析拆成「选批次 → 调分析器 → 回写与标记」三步，批次有界、可续跑、默认 dryRun，分析器可注入。这样没有 DeepSeek Key 也能验证队列本身（40 项离线用例）。
+
+**为什么先修 bug 再写队列**：队列的核心承诺是「已分析的不重复做」，而当时有两个 bug 正好破坏这个承诺：
+
+1. **`ready` 会把 `analyzed` 降级。** `repoToCandidate` 每次都带 `status: 'ready'`，而 `upsertCandidates` 的条件里有一条 `item.status === 'ready'` 就允许覆盖。于是每次重新同步（Telegram 每天一次、GitHub 探索随时）都会把已分析候选打回 `ready`，进度标记永远不可信。已改为单向合并 `mergeStatus()`：终态（`analyzed` / `dismissed`）不被普通状态降级。
+2. **Telegram 候选的 AI 结果写不回池子。** `applyAiPatches` 只比对 `candidate.sourceItemId`，但前端回传的是卡片 id `github-<repoId>`。GitHub 候选两者恰好相同所以一直没暴露；Telegram 候选的 `sourceItemId` 是 `telegram-<频道>-<消息>-<repoId>`，于是它的 AI 结果**永远写不回去，刷新就丢**。已改为三种键都能匹配（`sourceItemId` / 卡片 id / `canonicalUrl`）。
+
+这两条都属于「不报错、不崩溃、测试也能过」的静默错误，和 17.7 节记的来源解释编造关系是同一类。
+
+**分析状态的判定**：用 `metadata.analyzedAt`（旧数据兼容 `metadata.aiPatch`）而不是只看 `status`。理由是 `status` 会被连接器覆盖，而 `metadata` 是合并写入的，更能代表「这个候选真的被分析过」。
+
+**没有配置 Key 时坚决不标记。** `configured: false` 时队列只报告、不动数据。如果这里图省事把「没分析」记成「已分析」，队列会在用户毫无察觉的情况下空转完，而且再也补不回来。
+
+### 2026-09-29：测试隔离必须实际验证，不能只靠声明
+
+`OPENRADAR_DATA_DIR` 之前只有 `store.ts` 认，其余四个模块硬编码 `data/`，导致「隔离跑测试」实际写进了用户真实画像（46 个候选、10 条事件）。详见 17.8 节。
+
+定下的规则：
+
+1. 数据目录只能有一个来源：`store.ts` 导出的 `resolveDataDir()`，任何模块都不许自己拼 `projectDir/data`。
+2. 会写数据的测试脚本必须自带门禁。`/api/health` 暴露 `isolated`，`npm run smoke` 在未隔离时拒绝执行（退出码 2），要打真实实例必须显式 `--force`。
+3. **声明了隔离就要实测。** 验证方法是：起隔离实例，确认它读到的数据是空的，并对比真实库在测试前后完全一致。只看「临时目录里生成了一个 .sqlite」是不够的——那次就是空库躺在临时目录里，而真实数据在被读写。
 
 ---
+
+## 20.5 本轮实现记录（2026-09-29）
+
+### 2026-09-29（第二个代理接手）：分析队列、限流回填与隔离修复
+
+接 Codex 的交接项 4 继续做，新增：
+
+- `server/analysis.ts`：分析队列。批次有界（默认 6、上限 8）、可续跑、支持 `dryRun`、分析器可注入（所以没有 API Key 也能完整测）。
+- `GET /api/analysis/status`、`POST /api/analysis/run`（**默认 dryRun**，必须显式传 `"dryRun": false` 才会真的调用）。
+- `server/check-analysis.ts`：40 项离线用例，已并入 `npm run check`。
+- GitHub 限流识别：`githubRequest` 现在读取 `x-ratelimit-remaining` / `x-ratelimit-reset` / `retry-after`，标出 `rateLimited`；`POST /api/github/backfill` 遇限流立即停止并返回 `rateLimitResetAt`，不再把限流算成项目失败。
+- 修复两个会让分析队列失效的 bug（详见下面的决策记录）：`ready` 会把 `analyzed` 降级；Telegram 候选的 AI 结果永远写不回候选池。
+- 修复测试隔离失效（17.8 节），`/api/health` 增加 `isolated`，`npm run smoke` 加硬门禁。
+
+**没有做到的**：真实的 DeepSeek 调用一次都没验过（本机没有 Key）。队列逻辑用假分析器覆盖了，但「真的连上 DeepSeek 会不会按预期写回」仍然未知。接手的第一个动作应该是配 Key 后小批试跑。
+
+### 2026-09-29：P0-6 SQLite、连续浏览和公开卡片契约
+
+候选池、用户行为事件、Telegram 暂存和 DeepSeek 缓存已统一进入 `server/store.ts` 管理的 `data/openradar.sqlite`。首次启动会读取旧的 `candidates.json`、`events.json`、`staging.json` 并迁移，旧文件保留不删除。SQLite 使用 Node 24 内置的 `node:sqlite`，没有新增原生依赖。
+
+> **更正（2026-09-29 晚）**：这一版原本写「`OPENRADAR_DATA_DIR` 仍可隔离测试数据」，**当时这句话是错的**。只有 `store.ts` 认这个变量，`index.ts` / `staging.ts` / `telegram.ts` / `telegram-public.ts` 都硬编码了 `data/`，所以候选池和会话实际读写的是用户真实数据。已修复，详见 17.8 节的事故记录。原文保留在上面是为了让后来的人看到「文档声明过、但代码没做到」这种偏差长什么样。
+
+新增接口：`GET /api/feed?cursor=&limit=` 返回 ready/analyzed 候选和下一页游标；`POST /api/feedback` 记录产品化反馈；`GET /api/projects/:id/related` 统一相似项目入口；`POST /api/github/backfill` 回填 GitHub 限流期间留下的 pending 链接。首页“继续刷”已接入 feed，前端按游标合并且不重复显示。
+
+公开卡片已经移除“为什么看到这个”“为什么给你看”和内部评分/理由字段。DeepSeek 仍负责标题、摘要、标签、难度和价值判断；分析结果按输入哈希缓存，并写回候选 metadata，后续页面刷新仍可使用。GitHub 限流时 Telegram 链接先保存为 pending，不阻塞同批其他频道。
+### 给下一位 AI 的接手顺序
+
+1. 先阅读 `server/store.ts`、`server/candidates.ts`、`server/events.ts`、`server/staging.ts`、`server/analysis.ts`，确认 SQLite 表、旧 JSON 迁移逻辑和分析队列的状态机。
+2. 运行 `npm run build`、`npm run lint`、`npm run check`（现在是三套离线用例）。需要接口验证时先把 API 的 `OPENRADAR_DATA_DIR` 指向临时目录再起服务，然后 `npm run smoke -- http://127.0.0.1:8799`。**冒烟脚本会自己检查隔离，没隔离就拒绝跑**，所以不用再靠记性。
+3. 当前真实运行数据在 `data/openradar.sqlite`（被 `.gitignore` 忽略）：暂存约 3227 条消息（2956 `new` / 271 `filtered`），候选池 99 个（46 个 GitHub 发现 + 53 个 Telegram），**已分析 0 个**，`ai_cache` 为空。
+4. **下一步就是分析队列本身**：`server/analysis.ts` 和 `GET /api/analysis/status`、`POST /api/analysis/run` 已经写好并通过 40 项离线用例，但**从来没有对着真实的 DeepSeek 跑过一次**（本机没有 `DEEPSEEK_API_KEY`）。配好 Key 之后，先 `POST /api/analysis/run` 不传 `dryRun`（默认就是计划模式）看清会处理哪些，再传 `"dryRun": false` 小批（limit 2~4）试跑，确认写回和缓存都对，再逐步放量。不要一次把 99 个甚至上千条送出去。
+5. 回填：`POST /api/github/backfill` 现在遇限流会提前停下并返回 `rateLimited` + `rateLimitResetAt`，不再把限流当成项目失败。没配 GitHub Token 时未认证额度只有 60 次/小时。当前 `pending` 为 0，等下一次 Telegram 同步撞上限流才会再出现。
+6. 后续再增加真正的比较结果持久化、RSS/Hacker News 等来源和自动推送；不要把首页改成频道/分类数据后台。
 
 ## 21. 完成标准（Definition of Done）
 
@@ -1737,4 +1980,3 @@ DeepSeek 用来分析、改写、匹配和比较；被推荐的项目不需要�
 > 每次用户打开，都能舒服地看到几个他愿意点开的东西；点开之后，能更快理解、找到替代方案、做出选择；系统也因此越来越知道他喜欢什么。
 
 如果一个功能会让页面更杂、更像 GitHub、更像新闻列表，即使技术上很先进，也要先问：它是否让用户更容易发现和判断一个值得试的工具？
-

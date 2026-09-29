@@ -9,6 +9,7 @@
  */
 import { canonicalizeUrl, clearPool, poolStats, upsertCandidates } from './candidates.js'
 import { candidateToTool, repoToCandidate, repoToTool, type GitHubRepo } from './connectors/github.js'
+import { inferGitHubLinks, isLikelyAdvertisement, normalizePublicChannel, parseTelegramPreview } from './connectors/telegram-public.js'
 
 let failures = 0
 
@@ -36,6 +37,16 @@ check('非 github 域名保留路径大小写',
   canonicalizeUrl('HTTPS://Example.COM/Path/'), 'https://example.com/Path')
 check('无法解析的字符串退化为小写原文，不抛错',
   canonicalizeUrl('  Not A Url  '), 'not a url')
+
+console.log('\n— Telegram 公开频道解析：只测纯函数，不联网 —')
+check('频道链接归一为用户名', normalizePublicChannel('https://t.me/s/GithubCOTV'), 'GithubCOTV')
+check('频道用户名去掉 @', normalizePublicChannel('@xiaoshuwu'), 'xiaoshuwu')
+check('正文单独一行的 owner/repo 会补成 GitHub 链接', inferGitHubLinks('工具介绍\naxios/axios\n其他内容'), ['https://github.com/axios/axios'])
+check('VPN/机场推广消息会被标记为广告', isLikelyAdvertisement('限时优惠 VPN 节点，注册送三天体验'), true)
+check('普通工具介绍不会误判为广告', isLikelyAdvertisement('这是一个本地运行的文件整理工具，支持 Windows 和 macOS'), false)
+const telegramFixture = '<div data-post="GithubCOTV/42"><div class="tgme_widget_message_text">好工具<br>axios/axios</div><a class="tgme_widget_message_date" href="https://t.me/GithubCOTV/42"><time datetime="2026-09-28T12:00:00+00:00"></time></a></div>'
+const parsedTelegram = parseTelegramPreview(telegramFixture, 'GithubCOTV')
+check('Telegram 消息提取保留消息 ID 和 GitHub 链接', [parsedTelegram[0]?.id, parsedTelegram[0]?.links], [42, ['https://github.com/axios/axios']])
 
 console.log('\n— 候选池：同批和跨批都必须去重 —')
 clearPool()

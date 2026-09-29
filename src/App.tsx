@@ -53,6 +53,8 @@ function App() {
   const [interestTags, setInterestTags] = useState(['能马上用', 'AI 工具', '自动化', '小而实用'])
   const [profile, setProfile] = useState<ProfileSummary | null>(null)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [feedCursor, setFeedCursor] = useState<string | null>(null)
+  const [feedHasMore, setFeedHasMore] = useState(true)
 
   useEffect(() => { localStorage.setItem('openradar_saved', JSON.stringify(saved)) }, [saved])
   useEffect(() => { localStorage.setItem('openradar_liked', JSON.stringify(liked)) }, [liked])
@@ -71,6 +73,7 @@ function App() {
         if (githubStatus) window.history.replaceState({}, '', window.location.pathname)
         if (nextConfig.connected) await loadMyStars(false)
         await loadProfile(false)
+        await loadRecommendations(12)
       } catch {
         // API 未启动时仍保留完整演示流。
       }
@@ -102,13 +105,7 @@ function App() {
    * 只有“打开/加入”这类正向动作才上报；取消喜欢、取消收藏目前不产生事件（见手册已知问题）。
    */
   const reportEvent = (tool: Tool, event: UserEventName) => {
-    void api.recordEvents([{
-      toolId: tool.id,
-      event,
-      sourceKind: tool.sourceKind,
-      sourceId: tool.sourceId,
-      tags: tool.tags,
-    }]).catch(() => undefined)
+    void api.feedback(tool, event).catch(() => undefined)
   }
 
   const loadProfile = async (open = false) => {
@@ -127,18 +124,37 @@ function App() {
     }
   }
 
-  /** 从候选池按评分和多样性取卡片。池是内存的，重启后会返回空数组。 */
+  /** 从服务端连续浏览流加载一页；候选池已持久化，重启后仍可继续。 */
   const loadRecommendations = async (limit = 12) => {
     try {
-      const result = await api.recommend(limit)
-      if (result.tools.length > 0) mergeTools(result.tools)
-      return result
+      const result = await api.feed('', limit)
+      if (result.items.length > 0) mergeTools(result.items)
+      setFeedCursor(result.nextCursor)
+      setFeedHasMore(result.hasMore)
+      return { ...result, tools: result.items }
     } catch {
       return null
     }
   }
 
-  const applyAiPatches = (patches: Array<Pick<Tool, 'id' | 'title' | 'summary' | 'why' | 'tags' | 'fit' | 'difficulty' | 'value'>>) => {
+  const loadMoreFeed = async () => {
+    if (!feedHasMore || busy) return
+    setBusy(true)
+    try {
+      const result = await api.feed(feedCursor ?? '', 20)
+      if (result.items.length > 0) {
+        mergeTools(result.items)
+        void enrichWithDeepSeek(result.items)
+      }
+      setFeedCursor(result.nextCursor)
+      setFeedHasMore(result.hasMore)
+      setNotice(result.items.length > 0 ? '又整理了 ' + result.items.length + ' 个项目，可以继续往下刷。' : '这一批暂时没有更多已整理项目。')
+    } catch {
+      setNotice('暂时读不到下一批项目，稍后再试。')
+    } finally { setBusy(false) }
+  }
+
+  const applyAiPatches = (patches: Array<Pick<Tool, 'id' | 'title' | 'summary' | 'tags' | 'fit' | 'difficulty' | 'value'>>) => {
     if (patches.length === 0) return
     const byId = new Map(patches.map((patch) => [patch.id, patch]))
     setTools((current) => current.map((tool) => {
@@ -206,16 +222,12 @@ function App() {
   const handleFindSimilar = async (tool: Tool) => {
     setTab('explore')
     setQuery('')
-    reportEvent(tool, 'similar')
-    if (!tool.repository) {
-      setNotice(`先围绕「${tool.name}」看看探索内容。`)
-      return
-    }
-    setBusy(true)
-    setNotice(`正在围绕「${tool.name}」找相似项目。`)
-    try {
-      const result = await api.similar(tool.repository.owner, tool.repository.name)
-      mergeTools(result.tools)
+   reportEvent(tool, 'similar')
+   setBusy(true)
+   setNotice(`正在围绕「${tool.name}」找相似项目。`)
+   try {
+      const result = await api.related(tool.id)
+     mergeTools(result.tools)
       void enrichWithDeepSeek(result.tools)
       setNotice(result.tools.length ? `找到 ${result.tools.length} 个相关项目，可以继续往下刷。` : '暂时没有找到足够相近的项目。')
     } catch (error) {
@@ -344,13 +356,13 @@ function App() {
       </header>
 
       <main id="top">
-        <section className="intro-grid"><div className="intro-copy"><p className="eyebrow"><span className="eyebrow-dot" /> 2026 年 9 月 28 日 · 为你挑的</p><h1>今天，发现一个<br /><em>值得试试</em>的东西。</h1><p className="intro-text">不必先读懂 GitHub。OpenRadar 把分散在项目、频道和工具目录里的新东西，整理成一眼能看懂的中文卡片。</p><div className="search-box"><Search size={18} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜工具、场景或标签" aria-label="搜索工具" />{query && <button className="clear-search" onClick={() => setQuery('')} aria-label="清除搜索"><X size={16} /></button>}</div></div><aside className="interest-note"><div className="note-topline"><Wand2 size={16} /> 系统正在认识你</div><p>你最近更容易被这些东西吸引：</p><div className="interest-tags">{interestTags.map((tag) => <span key={tag}>{tag}</span>)}</div><button className="text-link" onClick={() => void loadProfile(true)}>为什么给我看这些？ <ArrowUpRight size={15} /></button></aside></section>
+        <section className="intro-grid"><div className="intro-copy"><p className="eyebrow"><span className="eyebrow-dot" /> 2026 年 9 月 28 日 · 为你挑的</p><h1>今天，发现一个<br /><em>值得试试</em>的东西。</h1><p className="intro-text">不必先读懂 GitHub。OpenRadar 把分散在项目、频道和工具目录里的新东西，整理成一眼能看懂的中文卡片。</p><div className="search-box"><Search size={18} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜工具、场景或标签" aria-label="搜索工具" />{query && <button className="clear-search" onClick={() => setQuery('')} aria-label="清除搜索"><X size={16} /></button>}</div></div><aside className="interest-note"><div className="note-topline"><Wand2 size={16} /> 系统正在认识你</div><p>你最近更容易被这些东西吸引：</p><div className="interest-tags">{interestTags.map((tag) => <span key={tag}>{tag}</span>)}</div><button className="text-link" onClick={() => void loadProfile(true)}>查看兴趣画像 <ArrowUpRight size={15} /></button></aside></section>
 
         <section className="section-heading"><div><p className="section-kicker">{tab === 'explore' ? '换个方向看看' : tab === 'saved' ? '以后慢慢研究' : '今天先从这里开始'}</p><h2>{tab === 'explore' ? '探索一些你还没见过的' : tab === 'saved' ? '你留下来的宝藏' : '为你推荐'}</h2></div><div className="feed-meta"><span className="live-mark" /> {busy ? '正在整理中' : aiConfigured ? 'DeepSeek 中文分析已开启' : '持续更新中'}</div></section>
 
         {visibleTools.length > 0 ? <section className="feed-layout" aria-label="工具推荐列表"><FeatureCard tool={visibleTools[0]} saved={saved.includes(visibleTools[0].id)} liked={liked.includes(visibleTools[0].id)} starred={starred.includes(visibleTools[0].id)} compared={compare.includes(visibleTools[0].id)} onSave={() => handleSave(visibleTools[0])} onLike={() => handleLike(visibleTools[0])} onStar={() => void handleStar(visibleTools[0])} onCompare={() => handleCompareClick(visibleTools[0])} onSimilar={() => void handleFindSimilar(visibleTools[0])} onSkip={() => handleSkip(visibleTools[0])} onOpen={() => handleOpenDetail(visibleTools[0])} onOpenSource={() => reportEvent(visibleTools[0], 'open_source')} /><div className="side-feed">{visibleTools.slice(1).map((tool) => <ToolCard key={tool.id} tool={tool} saved={saved.includes(tool.id)} liked={liked.includes(tool.id)} starred={starred.includes(tool.id)} compared={compare.includes(tool.id)} onSave={() => handleSave(tool)} onLike={() => handleLike(tool)} onStar={() => void handleStar(tool)} onCompare={() => handleCompareClick(tool)} onSimilar={() => void handleFindSimilar(tool)} onSkip={() => handleSkip(tool)} onOpen={() => handleOpenDetail(tool)} onOpenSource={() => reportEvent(tool, 'open_source')} />)}</div></section> : <div className="empty-state"><Compass size={28} /><h3>还没找到匹配的工具</h3><p>换个关键词，或者先回到推荐流，让系统继续替你发现。</p><button className="primary-button" onClick={() => { setQuery(''); setTab('recommend') }}>回到推荐流</button></div>}
 
-        <section className="explore-prompt"><div className="prompt-icon"><Compass size={22} /></div><div><p className="section-kicker">不确定自己喜欢什么，也没关系</p><h3>继续往下刷，兴趣会慢慢长出来。</h3><p>前面是更像你的，后面会混进一些相邻方向。遇到喜欢的就留下，系统会记住。</p></div><button className="quiet-button" onClick={() => void openExplore()}>去探索 <ArrowUpRight size={16} /></button></section>
+        <section className="explore-prompt"><div className="prompt-icon"><Compass size={22} /></div><div><p className="section-kicker">不确定自己喜欢什么，也没关系</p><h3>继续往下刷，兴趣会慢慢长出来。</h3><p>前面是更像你的，后面会混进一些相邻方向。遇到喜欢的就留下，系统会记住。</p></div><button className="quiet-button" onClick={() => void loadMoreFeed()} disabled={!feedHasMore || busy}>{feedHasMore ? '继续刷' : '已经看到这里'} <ArrowUpRight size={16} /></button></section>
       </main>
 
       {compare.length > 0 && <div className="compare-dock" role="status"><div><strong>比较台</strong><span>已选 {compare.length}/3 个项目</span></div><div className="compare-actions"><button className="quiet-button" onClick={() => setCompare([])}>清空</button><button className="primary-button" onClick={() => setCompareOpen(true)}>开始比较 <ArrowUpRight size={15} /></button></div></div>}
@@ -375,7 +387,7 @@ function ToolImage({ tool, large = false }: { tool: Tool; large?: boolean }) {
 }
 
 function FeatureCard({ tool, ...props }: CardProps) {
-  return <article className="feature-card"><ToolImage tool={tool} large /><div className="feature-content"><div className="card-topline"><span>{tool.eyebrow}</span><span className="match-label">{tool.fit}</span></div><h3><button className="card-title-button" onClick={props.onOpen}>{tool.title}</button></h3><p className="card-summary">{tool.summary}</p><div className="why-block"><span>为什么给你看</span><p>{tool.why}</p></div><div className="tag-row">{tool.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div><CardActions tool={tool} {...props} /></div></article>
+  return <article className="feature-card"><ToolImage tool={tool} large /><div className="feature-content"><div className="card-topline"><span>{tool.eyebrow}</span><span className="match-label">{tool.fit}</span></div><h3><button className="card-title-button" onClick={props.onOpen}>{tool.title}</button></h3><p className="card-summary">{tool.summary}</p><div className="tag-row">{tool.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div><CardActions tool={tool} {...props} /></div></article>
 }
 
 function ToolCard({ tool, ...props }: CardProps) {

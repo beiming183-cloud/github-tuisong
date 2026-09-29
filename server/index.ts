@@ -5,9 +5,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express, { type NextFunction, type Request, type Response } from 'express'
 import { deepSeekConfig, enrichTools, type AiToolInput } from './ai.js'
-import { listPool, poolStats, upsertCandidates } from './candidates.js'
+import { analysisBacklog, runAnalysisBatch, selectAnalysisBatch } from './analysis.js'
+import { applyAiPatches, enableCandidatePersistence, findPoolEntryById, listPool, poolStats, upsertCandidates } from './candidates.js'
 import {
   candidateToTool,
+  candidateToRepo,
   githubDiscoveryConnector,
   githubRequest,
   isUsableRepo,
@@ -15,26 +17,34 @@ import {
   repoToCandidate,
   repoToTool,
   type GitHubRepo,
+  type GitHubRequestError,
   type GitHubSearchResult,
 } from './connectors/github.js'
 import { connectorStatuses } from './connectors/index.js'
+import {
+  getTelegramPublicChannels,
+  saveTelegramPublicChannels,
+  syncTelegramPublicChannels,
+  telegramPublicStatus,
+} from './connectors/telegram-public.js'
 import { eventCount, eventStats, listEvents, recordEvents, type UserEventInput } from './events.js'
 import {
   buildInterestProfile,
-  explainReasonCodes,
   hasProfile,
   rankCandidates,
   summarizeProfile,
 } from './recommend.js'
 import { sourceRegistry } from './sources.js'
+import { listStaged, stagingStats, updateStagedStatus, type StagedStatus } from './staging.js'
+import { resolveDataDir } from './store.js'
 import { disconnectTelegram, startTelegramLogin, telegramLoginStatus, telegramStatus } from './telegram.js'
 
 const app = express()
 const port = Number(process.env.PORT ?? 8787)
 const appUrl = process.env.APP_URL ?? 'http://127.0.0.1:5173'
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
-const projectDir = path.resolve(currentDir, '..')
-const dataDir = path.join(projectDir, 'data')
+const dataDir = resolveDataDir()
+enableCandidatePersistence(path.join(dataDir, 'candidates.json'))
 const sessionSecretFile = process.env.SESSION_SECRET_FILE ?? path.join(dataDir, 'session-secret')
 const githubClientId = process.env.GITHUB_CLIENT_ID
 const githubClientSecret = process.env.GITHUB_CLIENT_SECRET
@@ -203,7 +213,18 @@ async function refreshSessionIfNeeded(session: Session) {
 }
 
 app.get('/api/health', (_request, response) => {
-  response.json({ ok: true, service: 'openradar-api' })
+  response.json({
+    ok: true,
+    service: 'openradar-api',
+    /**
+     * 是否跑在隔离的数据目录里（设了 OPENRADAR_DATA_DIR）。
+     *
+     * 暴露这个标志是为了让 npm run smoke 能拒绝往真实数据里写测试内容。
+     * 之前「以为隔离了、其实没隔离」导致测试候选和事件直接写进了用户真实画像，
+     * 见交接手册的隔离事故记录。
+     */
+    isolated: Boolean(process.env.OPENRADAR_DATA_DIR),
+  })
 })
 
 app.get('/api/ai/config', (_request, response) => {
@@ -221,7 +242,42 @@ app.post('/api/ai/enrich', asyncRoute(async (request, response) => {
     return
   }
   const patches = await enrichTools(tools)
-  response.json({ provider: 'deepseek', configured: true, model: deepSeekConfig.model, patches })
+  const stored = applyAiPatches(patches)
+  response.json({ provider: 'deepseek', configured: true, model: deepSeekConfig.model, patches, stored })
+}))
+
+/**
+ * 分析队列状态。只报告积压和批次计划，不发任何请求。
+ * `configured: false` 时 nextBatch 仍然会列出来，方便先看清工作量再决定要不要配 Key。
+ */
+app.get('/api/analysis/status', (_request, response) => {
+  const backlog = analysisBacklog()
+  response.json({
+    configured: deepSeekConfig.configured,
+    provider: 'deepseek',
+    model: deepSeekConfig.model,
+    backlog,
+    nextBatch: selectAnalysisBatch().map((entry) => ({
+      id: entry.candidate.sourceItemId ?? entry.canonicalUrl,
+      title: entry.candidate.title ?? null,
+      sourceKind: entry.candidate.sourceKind,
+      sourceId: entry.candidate.sourceId,
+    })),
+  })
+})
+
+/**
+ * 跑一批分析。
+ *
+ * 默认是 dryRun，必须显式传 `"dryRun": false` 才会真的调用 DeepSeek 并写回候选池。
+ * 这样误触接口不会一下子消耗掉一批额度。
+ */
+app.post('/api/analysis/run', asyncRoute(async (request, response) => {
+  const result = await runAnalysisBatch({
+    limit: request.body?.limit,
+    dryRun: request.body?.dryRun !== false,
+  })
+  response.status(result.error ? 502 : 200).json(result)
 }))
 
 app.get('/api/github/config', (request, response) => {
@@ -293,12 +349,6 @@ app.get('/api/recommend', (request, response) => {
       if (!tool) return undefined
       return {
         ...tool,
-        // 卡片上的「为什么给你看」直接用评分算出来的理由，而不是通用文案。
-        why: item.reason,
-        score: Math.round(item.total * 100) / 100,
-        reasonCodes: item.reasonCodes,
-        reasonDetails: explainReasonCodes(item.reasonCodes),
-        matchedTags: item.matchedTags,
       }
     })
     .filter((tool): tool is NonNullable<typeof tool> => Boolean(tool))
@@ -311,6 +361,81 @@ app.get('/api/recommend', (request, response) => {
     tools,
   })
 })
+
+function decodeFeedCursor(raw: unknown) {
+  if (typeof raw !== 'string' || !raw) return 0
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as { offset?: number }
+    return Number.isFinite(parsed.offset) ? Math.max(0, Math.trunc(parsed.offset ?? 0)) : 0
+  } catch { return 0 }
+}
+
+function encodeFeedCursor(offset: number) {
+  return Buffer.from(JSON.stringify({ offset })).toString('base64url')
+}
+
+/** 面向首页的持续浏览流：只返回可展示卡片，不暴露内部评分和推荐理由。 */
+app.get('/api/feed', (request, response) => {
+  const limit = Math.min(Math.max(Number(request.query.limit ?? 20), 1), 50)
+  const entries = listPool(100_000)
+  const profile = buildInterestProfile(listEvents())
+  const ready = entries.filter((entry) => !entry.candidate.status || entry.candidate.status === 'ready' || entry.candidate.status === 'analyzed')
+  const ranked = rankCandidates(ready, profile, { limit: ready.length })
+  const offset = decodeFeedCursor(request.query.cursor)
+  const page = ranked.slice(offset, offset + limit)
+  const tools = page.map((item) => candidateToTool(item.candidate)).filter((tool): tool is NonNullable<typeof tool> => Boolean(tool))
+  const nextOffset = offset + page.length
+  response.json({
+    source: 'candidate-feed',
+    hasProfile: hasProfile(profile),
+    items: tools,
+    nextCursor: nextOffset < ranked.length ? encodeFeedCursor(nextOffset) : null,
+    hasMore: nextOffset < ranked.length,
+    considered: ready.length,
+    pending: entries.filter((entry) => entry.candidate.status === 'pending' || entry.candidate.status === 'staged').length,
+  })
+})
+
+/** 反馈是行为事件的产品化别名，保留同一套兴趣画像权重。 */
+app.post('/api/feedback', (request, response) => {
+  const toolId = String(request.body?.projectId ?? request.body?.toolId ?? '').trim()
+  const event = String(request.body?.event ?? '').trim() as UserEventInput['event']
+  if (!toolId || !['like', 'save', 'star', 'compare', 'similar', 'skip', 'dismiss', 'view', 'open_source'].includes(event)) {
+    response.status(400).json({ error: '项目或反馈类型不正确。' })
+    return
+  }
+  const result = recordEvents([{
+    toolId,
+    event,
+    sourceKind: typeof request.body?.sourceKind === 'string' ? request.body.sourceKind : undefined,
+    sourceId: typeof request.body?.sourceId === 'string' ? request.body.sourceId : undefined,
+    tags: Array.isArray(request.body?.tags) ? request.body.tags : undefined,
+  }])
+  response.json({ stored: result.stored.length, profile: summarizeProfile(buildInterestProfile(listEvents())) })
+})
+
+app.get('/api/projects/:id/related', asyncRoute(async (request, response) => {
+  const id = decodeURIComponent(String(request.params.id))
+  const entry = findPoolEntryById(id)
+  if (!entry) {
+    response.status(404).json({ error: '没有找到这个项目。' })
+    return
+  }
+  const repo = candidateToRepo(entry.candidate)
+  if (repo) {
+    const session = getSession(request)
+    const topic = repo.topics?.[0]
+    const qualifiers = [topic ? 'topic:' + topic : '', repo.language ? 'language:' + repo.language : '', 'stars:>100'].filter(Boolean).join(' ')
+    const result = await githubFetch<GitHubSearchResult>('/search/repositories?q=' + encodeURIComponent(qualifiers) + '&sort=stars&order=desc&per_page=12', session)
+    const usable = result.items.filter((item) => item.full_name !== repo.full_name && isUsableRepo(item)).slice(0, 8)
+    const pool = upsertCandidates(usable.map((item) => repoToCandidate(item, 'github-similar', '相似项目')))
+    response.json({ source: repo.full_name, tools: usable.map((item) => repoToTool(item, 'GitHub 项目', 'github-similar')), pool: { size: pool.poolSize, added: pool.addedCount, duplicates: pool.duplicateCount } })
+    return
+  }
+  const tags = new Set(entry.candidate.tags ?? [])
+  const related = listPool(100_000).filter((item) => item.canonicalUrl !== entry.canonicalUrl && (item.candidate.tags ?? []).some((tag) => tags.has(tag))).slice(0, 8)
+  response.json({ source: entry.candidate.title ?? entry.canonicalUrl, tools: related.map((item) => candidateToTool(item.candidate)).filter((tool): tool is NonNullable<typeof tool> => Boolean(tool)) })
+}))
 
 /** 候选池状态。只暴露地址和计数，不暴露任何凭证。 */
 app.get('/api/candidates', (request, response) => {
@@ -329,6 +454,28 @@ app.get('/api/candidates', (request, response) => {
   })
 })
 
+/** 原始来源暂存区：批量抓取先进入这里，不直接污染推荐流。 */
+app.get('/api/staging', (request, response) => {
+  const limit = Math.min(Math.max(Number(request.query.limit ?? 50), 1), 200)
+  const rawStatus = String(request.query.status ?? '')
+  const status = ['new', 'ready', 'dismissed', 'filtered'].includes(rawStatus) ? rawStatus as StagedStatus : undefined
+  response.json({ stats: stagingStats(), items: listStaged(limit, status) })
+})
+
+app.patch('/api/staging/:id', (request, response) => {
+  const status = String(request.body?.status ?? '')
+  if (!['new', 'ready', 'dismissed', 'filtered'].includes(status)) {
+    response.status(400).json({ error: '暂存状态不正确。' })
+    return
+  }
+  const item = updateStagedStatus(String(request.params.id), status as StagedStatus)
+  if (!item) {
+    response.status(404).json({ error: '没有找到这条暂存内容。' })
+    return
+  }
+  response.json({ item, stats: stagingStats() })
+})
+
 app.get('/api/telegram/config', asyncRoute(async (_request, response) => {
   response.json(await telegramStatus())
 }))
@@ -344,6 +491,53 @@ app.get('/api/telegram/login/:id', asyncRoute(async (request, response) => {
 app.post('/api/telegram/logout', asyncRoute(async (_request, response) => {
   await disconnectTelegram()
   response.status(204).end()
+}))
+
+/**
+ * 公开频道路线不依赖 Telegram API：用户只需粘贴公开频道链接，配置保存在
+ * data/telegram-web/channels.json。同步结果会进入统一候选池。
+ */
+app.get('/api/telegram/public/status', (_request, response) => {
+  response.json(telegramPublicStatus())
+})
+
+app.put('/api/telegram/public/channels', (request, response) => {
+  const raw = Array.isArray(request.body?.channels) ? request.body.channels : []
+  if (raw.length > 50 || raw.some((item: unknown) => typeof item !== 'string')) {
+    response.status(400).json({ error: '频道数量或格式不正确，最多保存 50 个公开频道。' })
+    return
+  }
+  try {
+    const channels = saveTelegramPublicChannels(raw)
+    response.json({ channels, status: telegramPublicStatus() })
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : String(error) })
+  }
+})
+
+app.post('/api/telegram/public/sync', asyncRoute(async (request, response) => {
+  const rawChannels = Array.isArray(request.body?.channels) ? request.body.channels as string[] : undefined
+  if (rawChannels && rawChannels.some((item) => typeof item !== 'string')) {
+    response.status(400).json({ error: '频道格式不正确。' })
+    return
+  }
+  const session = getSession(request)
+  const result = await syncTelegramPublicChannels({
+    channels: rawChannels,
+    limit: Math.min(Math.max(Number(request.body?.limit ?? 40), 1), 100),
+    pages: Math.min(Math.max(Number(request.body?.pages ?? 3), 1), 10),
+    token: session ? await refreshSessionIfNeeded(session) : undefined,
+  })
+  const pool = upsertCandidates(result.candidates)
+  response.json({
+    source: result.source,
+    channels: result.channels,
+    messagesRead: result.messagesRead,
+    channelResults: result.channelResults,
+    candidates: result.candidates.map(candidateToTool).filter((tool): tool is NonNullable<typeof tool> => Boolean(tool)),
+    pool: { size: pool.poolSize, added: pool.addedCount, duplicates: pool.duplicateCount },
+    status: telegramPublicStatus(),
+  })
 }))
 
 app.get('/api/github/stars', asyncRoute(async (request, response) => {
@@ -415,6 +609,50 @@ app.get('/api/discover/github', asyncRoute(async (request, response) => {
     query: customQuery || 'stars:>500 且最近 180 天有更新',
     tools,
     pool: { size: pool.poolSize, added: pool.addedCount, duplicates: pool.duplicateCount },
+  })
+}))
+
+/** 回填 Telegram 或其他来源因 GitHub 限流而暂存的项目。 */
+app.post('/api/github/backfill', asyncRoute(async (request, response) => {
+  const session = getSession(request)
+  const limit = Math.min(Math.max(Number(request.body?.limit ?? 20), 1), 50)
+  const pending = listPool(100_000).filter((entry) => entry.candidate.status === 'pending').slice(0, limit)
+  let updated = 0
+  let failed = 0
+  let rateLimited = false
+  let rateLimitResetAt: string | undefined
+
+  for (const entry of pending) {
+    const metadata = (entry.candidate.metadata ?? {}) as { owner?: string; name?: string }
+    if (!metadata.owner || !metadata.name) { failed += 1; continue }
+    try {
+      const repo = await githubFetch<GitHubRepo>('/repos/' + encodeURIComponent(metadata.owner) + '/' + encodeURIComponent(metadata.name), session)
+      if (!isUsableRepo(repo)) { failed += 1; continue }
+      upsertCandidates([repoToCandidate(repo, entry.candidate.sourceId, entry.candidate.sourceLabel)])
+      updated += 1
+    } catch (error) {
+      // 限流不是「这个项目坏了」。立刻停下来，剩下的留到额度恢复后再回填，
+      // 否则一次限流会把整批正常项目都记成失败，报告完全失真。
+      if ((error as GitHubRequestError).rateLimited) {
+        rateLimited = true
+        rateLimitResetAt = (error as GitHubRequestError).rateLimitResetAt
+        break
+      }
+      failed += 1
+    }
+  }
+
+  const remaining = listPool(100_000).filter((entry) => entry.candidate.status === 'pending').length
+  response.json({
+    attempted: pending.length,
+    updated,
+    failed,
+    rateLimited,
+    rateLimitResetAt: rateLimitResetAt ?? null,
+    remaining,
+    message: rateLimited
+      ? `GitHub 额度用完了，本批在 ${updated} 个成功后就停下，剩下的 ${remaining} 个等额度恢复后再回填。`
+      : `本批处理 ${pending.length} 个，成功 ${updated} 个，失败 ${failed} 个，剩余 ${remaining} 个待回填。`,
   })
 }))
 
@@ -504,6 +742,33 @@ app.post('/api/auth/logout', (request, response) => {
   response.status(204).end()
 })
 
+/**
+ * 轻量本地调度：默认每 24 小时最多同步一次公开频道。
+ * 服务器没有持续运行时，下次启动会根据 lastSyncAt 补跑一次；不会为了定时任务
+ * 强行启动 Telegram 登录，也不会高频访问频道页面。
+ */
+const telegramSyncIntervalHours = Math.max(Number(process.env.TELEGRAM_PUBLIC_SYNC_INTERVAL_HOURS ?? 24), 1)
+let telegramSyncRunning = false
+
+async function runScheduledTelegramSync() {
+  if (telegramSyncRunning || getTelegramPublicChannels().length === 0) return
+  const status = telegramPublicStatus()
+  // 首次同步必须由用户手动触发，避免刚配置一批频道就自动回看大量历史消息。
+  if (!status.lastSyncAt) return
+  const due = Date.now() - new Date(status.lastSyncAt).getTime() >= telegramSyncIntervalHours * 3_600_000
+  if (!due) return
+  telegramSyncRunning = true
+  try {
+    const result = await syncTelegramPublicChannels({ limit: 40, pages: 3 })
+    const pool = upsertCandidates(result.candidates)
+    console.log(`Telegram 公开频道同步完成：读取 ${result.messagesRead} 条新消息，候选新增 ${pool.addedCount} 条。`)
+  } catch (error) {
+    console.warn(`Telegram 公开频道自动同步失败：${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    telegramSyncRunning = false
+  }
+}
+
 const distDir = path.resolve(currentDir, '..', 'dist')
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(distDir))
@@ -519,4 +784,6 @@ app.use((error: Error & { status?: number; detail?: string }, _request: Request,
 
 app.listen(port, '127.0.0.1', () => {
   console.log(`OpenRadar API running at http://127.0.0.1:${port}`)
+  void runScheduledTelegramSync()
+  setInterval(() => { void runScheduledTelegramSync() }, telegramSyncIntervalHours * 3_600_000)
 })

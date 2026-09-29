@@ -9,13 +9,16 @@
  */
 
 import fs from 'node:fs/promises'
+import { execFile } from 'node:child_process'
 import path from 'node:path'
 import process from 'node:process'
+import { promisify } from 'node:util'
 
 const DEFAULT_LIMIT = 20
 const DEFAULT_PAGES = 5
 const DEFAULT_DELAY_MS = 800
 const USER_AGENT = 'OpenRadar-Personal-TelegramWebReader/0.1 (public-channel-reader)'
+const execFileAsync = promisify(execFile)
 
 function printHelp() {
   console.log(`
@@ -132,22 +135,41 @@ function htmlAttribute(block, name) {
   return decodeHtml(block.match(expression)?.[1] ?? '')
 }
 
-function extractLinks(block, text) {
+function extractLinks(block, text, username) {
   const links = []
   for (const match of block.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi)) {
     const href = decodeHtml(match[1]).trim()
-    if (/^https?:\/\//i.test(href) && !links.includes(href)) links.push(href)
+    const isSameChannel = new RegExp(`^https?:\\/\\/(?:www\\.)?t\\.me\\/${username}(?:\\/|$)`, 'i').test(href)
+    if (/^https?:\/\//i.test(href) && !isSameChannel && !links.includes(href)) links.push(href)
   }
   for (const match of text.matchAll(/https?:\/\/[^\s<>]+/gi)) {
     const href = match[0].replace(/[),.;!?]+$/, '')
+    if (!links.includes(href)) links.push(href)
+  }
+  for (const href of inferGitHubLinks(text)) {
+    if (!links.includes(href)) links.push(href)
+  }
+  return links
+}
+
+function inferGitHubLinks(text) {
+  const links = []
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim()
+    const match = line.match(/^([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\/([A-Za-z0-9_.-]{1,100})$/)
+    if (!match) continue
+    const repo = match[2].replace(/\.git$/i, '')
+    const href = `https://github.com/${match[1]}/${repo}`
     if (!links.includes(href)) links.push(href)
   }
   return links
 }
 
 function extractImage(block) {
-  const match = block.match(/(?:background-image:\s*url|<img[^>]+src)\s*\(?["']?([^"')\s]+)["']?\)?/i)
-  return match ? decodeHtml(match[1]) : null
+  const background = block.match(/background-image\s*:\s*url\(\s*["']?([^"')\s]+)["']?\s*\)/i)
+  if (background) return decodeHtml(background[1])
+  const image = block.match(/<img\b[^>]*\bsrc=["']([^"']+)["']/i)
+  return image ? decodeHtml(image[1]) : null
 }
 
 function extractChannelMeta(html, username) {
@@ -163,7 +185,7 @@ function extractMessages(html, username) {
   for (let index = 0; index < starts.length; index += 1) {
     const start = starts[index].index ?? 0
     const end = starts[index + 1]?.index ?? html.length
-    const block = html.slice(Math.max(0, start - 500), end)
+    const block = html.slice(start, end)
     const post = decodeHtml(starts[index][1])
     const parts = post.split('/')
     const postUsername = parts[0] || username
@@ -178,7 +200,7 @@ function extractMessages(html, username) {
     const author = htmlToText(block.match(/class="tgme_widget_message_from_author[^"]*"[^>]*>([\s\S]*?)<\/a>/i)?.[1] ?? '') || null
     const forwardedFrom = htmlToText(block.match(/class="tgme_widget_message_forwarded_from[^"]*"[^>]*>([\s\S]*?)<\/div>/i)?.[1] ?? '') || null
 
-    messages.push({ id, url: dateLink, channel: postUsername, text, publishedAt: date, viewsText: viewsText || null, author, forwardedFrom, image: extractImage(block), links: extractLinks(block, text) })
+    messages.push({ id, url: dateLink, channel: postUsername, text, publishedAt: date, viewsText: viewsText || null, author, forwardedFrom, image: extractImage(block), links: extractLinks(block, text, postUsername) })
   }
   return messages
 }
@@ -186,9 +208,24 @@ function extractMessages(html, username) {
 async function fetchPreview(username, before) {
   const url = new URL(`https://t.me/s/${username}`)
   if (before) url.searchParams.set('before', String(before))
-  const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml' }, redirect: 'follow', signal: AbortSignal.timeout(20_000) })
-  if (!response.ok) throw new Error(`Telegram 网页返回 ${response.status}，暂时无法读取 @${username}。`)
-  const html = await response.text()
+  let html = ''
+  try {
+    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml' }, redirect: 'follow', signal: AbortSignal.timeout(20_000) })
+    if (!response.ok) throw new Error(`Telegram 网页返回 ${response.status}`)
+    html = await response.text()
+  } catch (fetchError) {
+    if (process.platform !== 'win32') {
+      const detail = fetchError instanceof Error ? fetchError.message : String(fetchError)
+      throw new Error(`无法访问 Telegram 公开页面（${detail}）。请检查网络或代理设置。`)
+    }
+    try {
+      const result = await execFileAsync('curl.exe', ['-L', '--fail', '--max-time', '20', '-A', USER_AGENT, url.toString()], { maxBuffer: 8 * 1024 * 1024, windowsHide: true })
+      html = result.stdout
+    } catch (curlError) {
+      const detail = curlError instanceof Error ? curlError.message : String(curlError)
+      throw new Error(`无法访问 Telegram 公开页面（Node 和 curl 都失败：${detail}）。请先在浏览器确认 ${url} 能打开。`)
+    }
+  }
   if (!html.includes('tgme_widget_message')) throw new Error(`没有找到 @${username} 的公开网页预览。它可能是私有频道、用户名不正确，或 Telegram 暂时限制了访问。`)
   return { html, url: url.toString() }
 }
@@ -248,4 +285,3 @@ main().catch((error) => {
   console.error(`读取失败：${error instanceof Error ? error.message : String(error)}`)
   process.exitCode = 1
 })
-

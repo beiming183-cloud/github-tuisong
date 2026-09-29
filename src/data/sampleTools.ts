@@ -7,7 +7,6 @@ export const sampleTools: Tool[] = [
     eyebrow: 'Windows / macOS / Linux · 开源',
     title: '下载、截图、临时文件太多？先把重复的找出来。',
     summary: '一个轻量的重复文件和相似图片清理工具，适合把长期失控的文件夹重新整理起来。',
-    why: '你经常收藏能立刻解决小麻烦的工具；它不需要复杂配置，装好就能开始清理。',
     tags: ['桌面整理', '文件工具', '本地运行'],
     fit: '很适合试试',
     difficulty: '上手低',
@@ -24,7 +23,6 @@ export const sampleTools: Tool[] = [
     eyebrow: 'Windows / Android / iOS · 开源',
     title: '不想再给自己发微信？局域网里直接把文件递过去。',
     summary: '不依赖云盘和账号的跨设备传文件工具，手机、电脑之间可以直接交换文件。',
-    why: '它属于“看起来很小，但用上以后会一直留着”的工具，和你喜欢的宝藏频道很像。',
     tags: ['跨设备', '文件传输', '隐私友好'],
     fit: '可能会常用',
     difficulty: '上手低',
@@ -41,7 +39,6 @@ export const sampleTools: Tool[] = [
     eyebrow: 'AI 工作流 · 开源',
     title: '想试一个 AI 工作流，但不想先写一堆代码？',
     summary: '用可视化方式连接模型、知识库和工具，快速搭出可以实际运行的 AI 流程。',
-    why: '这是一次探索推荐：它和你关注的 AI 工具方向相邻，但更偏“搭建和连接”。',
     tags: ['AI 工作流', '可视化', '二次开发'],
     fit: '值得认识',
     difficulty: '上手中',
@@ -59,7 +56,6 @@ export const sampleTools: Tool[] = [
     eyebrow: 'Windows · 微软开源工具集',
     title: '电脑里总有一些小动作很烦？这里可能已经有人替你补上了。',
     summary: '一组持续增加的 Windows 实用工具，覆盖窗口布局、快速启动、批量重命名等高频场景。',
-    why: '不是新项目，但它很适合当作工具库里的“常备底座”，也可以继续追踪新模块。',
     tags: ['Windows', '效率工具', '工具箱'],
     fit: '适合收着',
     difficulty: '上手低',
@@ -71,4 +67,3 @@ export const sampleTools: Tool[] = [
     repository: { owner: 'microsoft', name: 'PowerToys', fullName: 'microsoft/PowerToys', stars: 0, language: 'C#', updatedAt: '', topics: [] },
   },
 ]
-

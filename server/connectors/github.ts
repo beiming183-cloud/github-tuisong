@@ -43,11 +43,37 @@ export type GitHubCandidateMetadata = {
   updatedAt: string
 }
 
-export type GitHubRequestError = Error & { status?: number; detail?: string }
+export type GitHubRequestError = Error & {
+  status?: number
+  detail?: string
+  /** 本次请求后剩余的额度。GitHub 在成功和失败响应里都会带。 */
+  rateLimitRemaining?: number
+  /** 额度重置时间（ISO）。 */
+  rateLimitResetAt?: string
+  /** 是否确定是被限流，而不是链接本身有问题。 */
+  rateLimited?: boolean
+}
+
+function readRateLimit(response: Response) {
+  const remainingRaw = response.headers.get('x-ratelimit-remaining')
+  const resetRaw = response.headers.get('x-ratelimit-reset')
+  const remaining = remainingRaw === null ? undefined : Number(remainingRaw)
+  const resetSeconds = resetRaw === null ? undefined : Number(resetRaw)
+  return {
+    rateLimitRemaining: remaining !== undefined && Number.isFinite(remaining) ? remaining : undefined,
+    rateLimitResetAt: resetSeconds !== undefined && Number.isFinite(resetSeconds) && resetSeconds > 0
+      ? new Date(resetSeconds * 1000).toISOString()
+      : undefined,
+  }
+}
 
 /**
  * 唯一的 GitHub HTTP 入口。鉴权 Token 由调用方注入，
  * 401 刷新逻辑留在 server/index.ts，避免连接器碰会话。
+ *
+ * 限流会被单独标出来（403/429 且剩余额度为 0，或带 Retry-After）。
+ * 批量回填必须能区分「额度用完了，等会儿再来」和「这个链接是死的」，
+ * 否则一次限流会把几十个正常项目报成失败。
  */
 export async function githubRequest<T>(endpoint: string, token?: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${GITHUB_API}${endpoint}`, {
@@ -66,6 +92,9 @@ export async function githubRequest<T>(endpoint: string, token?: string, init?: 
     const error = new Error(`GitHub 请求失败（${response.status}）`) as GitHubRequestError
     error.status = response.status
     error.detail = detail
+    Object.assign(error, readRateLimit(response))
+    error.rateLimited = (response.status === 403 || response.status === 429)
+      && (response.headers.get('retry-after') !== null || error.rateLimitRemaining === 0)
     throw error
   }
 
@@ -98,6 +127,7 @@ export function repoToCandidate(repo: GitHubRepo, sourceId = 'github-discovery',
     sourceId,
     sourceLabel,
     sourcePublishedAt: repo.pushed_at,
+    status: 'ready',
     // 与 repoToTool 用的是同一套分类，保证评分标签和卡片标签一致。
     tags: classifyRepo(repo).tags.slice(0, 3),
     metadata,
@@ -148,7 +178,6 @@ export function repoToTool(repo: GitHubRepo, sourceLabel = 'GitHub 项目', sour
     eyebrow: `${repo.language ?? '开源'} · ${compactNumber(repo.stargazers_count)} Star`,
     title: category.title,
     summary: `这是一个围绕“${category.scene}”打造的开源项目。${activeText}，可以先看看实际用途再决定是否尝试。`,
-    why: `它已经获得 ${compactNumber(repo.stargazers_count)} 个 Star，并且与你关注的“${category.tags[0]}”方向相邻。`,
     tags: category.tags.slice(0, 3),
     fit: updatedDays <= 30 ? '值得现在看看' : repo.stargazers_count >= 10_000 ? '口碑项目' : '探索性推荐',
     difficulty,
@@ -219,8 +248,18 @@ export function candidateToTool(candidate: Candidate): ToolCard | undefined {
   const repo = candidateToRepo(candidate)
   if (!repo) return undefined
   const tool = repoToTool(repo, candidate.sourceLabel, candidate.sourceId)
+  const aiPatch = (candidate.metadata as { aiPatch?: Partial<ToolCard> } | undefined)?.aiPatch
+  if (aiPatch) {
+    if (typeof aiPatch.title === 'string') tool.title = aiPatch.title
+    if (typeof aiPatch.summary === 'string') tool.summary = aiPatch.summary
+    if (Array.isArray(aiPatch.tags) && aiPatch.tags.length > 0) tool.tags = aiPatch.tags.slice(0, 3)
+    if (typeof aiPatch.fit === 'string') tool.fit = aiPatch.fit
+    if (typeof aiPatch.difficulty === 'string') tool.difficulty = aiPatch.difficulty
+    if (typeof aiPatch.value === 'string') tool.value = aiPatch.value
+  }
   // 卡片标签必须和评分用的候选标签完全一致，否则「为什么给你看」会对不上。
-  return candidate.tags && candidate.tags.length > 0 ? { ...tool, tags: candidate.tags } : tool
+  const hasAiTags = Boolean((candidate.metadata as { aiPatch?: { tags?: unknown[] } } | undefined)?.aiPatch?.tags?.length)
+  return { ...tool, sourceKind: candidate.sourceKind, ...(!hasAiTags && candidate.tags && candidate.tags.length > 0 ? { tags: candidate.tags } : {}) }
 }
 
 const DISCOVERY_WINDOW_DAYS = 180

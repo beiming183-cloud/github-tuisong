@@ -10,7 +10,7 @@
     "telegram:read": "node scripts/telegram-public-reader.mjs",
     "build": "tsc -p tsconfig.server.json --noEmit && tsc -b && vite build",
     "lint": "oxlint",
-    "check": "tsx server/check-connectors.ts && tsx server/check-recommend.ts",
+    "check": "tsx server/check-connectors.ts && tsx server/check-recommend.ts && tsx server/check-analysis.ts",
     "smoke": "tsx server/smoke-api.ts",
     "preview": "vite preview",
     "start": "tsx server/index.ts"

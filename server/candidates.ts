@@ -8,7 +8,10 @@
  *
  * 明确不在本文件里做：UI 文案、推荐排序、AI 调用。
  */
+import fs from 'node:fs'
+import path from 'node:path'
 import type { Candidate } from './connectors/types.js'
+import { clearStoredCandidates, configureStore, listStoredCandidates, replaceStoredCandidates } from './store.js'
 
 export type PooledCandidate = {
   candidate: Candidate
@@ -32,6 +35,40 @@ export type UpsertResult = {
 }
 
 const pool = new Map<string, PooledCandidate>()
+let persistenceFile: string | undefined
+let sqlitePersistence = false
+
+/**
+ * 服务启动时显式开启候选池持久化。测试和纯函数检查默认不开启，
+ * 避免测试候选污染用户的真实推荐数据。
+ */
+export function enableCandidatePersistence(file: string) {
+  persistenceFile = file
+  const sqliteFile = path.join(path.dirname(file), 'openradar.sqlite')
+  configureStore(sqliteFile)
+  sqlitePersistence = true
+  try {
+    const saved = listStoredCandidates()
+    if (saved.length > 0) {
+      pool.clear()
+      for (const entry of saved) if (entry?.canonicalUrl && entry.candidate) pool.set(entry.canonicalUrl, entry)
+      return
+    }
+    // 首次升级时把旧 candidates.json 迁移进 SQLite，原文件保留作可恢复备份。
+    const legacy = JSON.parse(fs.readFileSync(file, 'utf8')) as PooledCandidate[]
+    if (Array.isArray(legacy) && legacy.length > 0) {
+      replaceStoredCandidates(legacy)
+      for (const entry of legacy) if (entry?.canonicalUrl && entry.candidate) pool.set(entry.canonicalUrl, entry)
+    }
+  } catch {
+    // 第一次运行没有文件是正常情况。
+  }
+}
+
+function persistPool() {
+  if (!persistenceFile || !sqlitePersistence) return
+  replaceStoredCandidates([...pool.values()])
+}
 
 /**
  * 常见的跟踪参数。同一篇文章带不同 utm 参数时不应该被当成两个候选。
@@ -84,6 +121,26 @@ export function canonicalizeUrl(raw: string): string {
 }
 
 /**
+ * 候选状态的“单向”合并规则。
+ *
+ * 为什么需要它：连接器每次抓到同一个仓库都会返回 `status: 'ready'`
+ * （见 connectors/github.ts 的 repoToCandidate）。如果直接覆盖，
+ * 一个已经分析过的候选会在每次重新同步时被降级回 ready，
+ * “已分析”这个进度标记就永远不可信，分析队列也会反复重做同一批。
+ *
+ * 规则：终态（analyzed / dismissed）不被普通状态降级；
+ * 其余情况允许从 pending → ready 这类前进，也允许刷新。
+ */
+const TERMINAL_STATUSES = new Set(['analyzed', 'dismissed'])
+
+export function mergeStatus(current: Candidate['status'], incoming: Candidate['status']): Candidate['status'] {
+  if (!incoming) return current
+  if (!current) return incoming
+  if (TERMINAL_STATUSES.has(current)) return current
+  return incoming
+}
+
+/**
  * 把一批候选写入池中。
  *
  * 幂等：同一批里出现两次的同一个 canonicalUrl 只会算一次 added，
@@ -106,6 +163,8 @@ export function upsertCandidates(items: Candidate[]): UpsertResult {
       // 只补空字段，不用后面的结果覆盖已经拿到的信息。
       if (!existing.candidate.title && item.title) existing.candidate.title = item.title
       if (!existing.candidate.description && item.description) existing.candidate.description = item.description
+      if (item.metadata) existing.candidate.metadata = { ...(existing.candidate.metadata ?? {}), ...item.metadata }
+      if (item.status) existing.candidate.status = mergeStatus(existing.candidate.status, item.status)
       duplicates.push(existing.candidate)
       continue
     }
@@ -121,6 +180,8 @@ export function upsertCandidates(items: Candidate[]): UpsertResult {
     })
     added.push(candidate)
   }
+
+  persistPool()
 
   return {
     added,
@@ -158,7 +219,62 @@ export function findInPool(rawUrl: string) {
   return pool.get(canonicalizeUrl(rawUrl))
 }
 
+export function findPoolEntryById(id: string) {
+  return [...pool.values()].find((entry) => entry.candidate.sourceItemId === id || entry.candidate.title === id)
+}
+
+/**
+ * 卡片的 Tool id。repoToTool 用 `github-<repoId>` 作为 id。
+ *
+ * 为什么需要它：applyAiPatches 以前只比对 candidate.sourceItemId，
+ * 但前端回传的是 Tool id。GitHub 候选两者刚好都是 `github-<repoId>` 所以看不出问题，
+ * Telegram 候选的 sourceItemId 是 `telegram-<频道>-<消息>-<repoId>`，
+ * 于是 Telegram 项目的 AI 结果**永远写不回候选池**，刷新就丢。
+ */
+function candidateToolId(candidate: Candidate) {
+  const repoId = (candidate.metadata as { repoId?: unknown } | undefined)?.repoId
+  return typeof repoId === 'number' ? `github-${repoId}` : undefined
+}
+
+export function applyAiPatches(patches: Array<{ id: string; title?: string; summary?: string; tags?: string[]; fit?: string; difficulty?: string; value?: string }>) {
+  let updated = 0
+  const now = new Date().toISOString()
+  for (const entry of pool.values()) {
+    const toolId = candidateToolId(entry.candidate)
+    const patch = patches.find((item) =>
+      item.id === entry.candidate.sourceItemId ||
+      (toolId !== undefined && item.id === toolId) ||
+      item.id === entry.candidate.canonicalUrl)
+    if (!patch) continue
+    entry.candidate.metadata = { ...(entry.candidate.metadata ?? {}), aiPatch: patch, analyzedAt: now }
+    entry.candidate.status = 'analyzed'
+    updated += 1
+  }
+  if (updated > 0) persistPool()
+  return updated
+}
+
+/**
+ * 标记一个候选「这一轮分析没有结果」，避免它在每一批里反复占用名额。
+ *
+ * 与 applyAiPatches 的区别：这里不写 aiPatch，只写 analysisSkipped，
+ * 分析队列据此把它算作已处理；将来接上更好的模型时可以按这个标记重跑。
+ */
+export function markAnalysisSkipped(canonicalUrl: string, reason = '本轮没有返回结果') {
+  const entry = pool.get(canonicalizeUrl(canonicalUrl))
+  if (!entry) return false
+  entry.candidate.metadata = {
+    ...(entry.candidate.metadata ?? {}),
+    analysisSkipped: reason,
+    analyzedAt: new Date().toISOString(),
+  }
+  entry.candidate.status = 'analyzed'
+  persistPool()
+  return true
+}
+
 /** 仅供本地自检和测试使用。 */
 export function clearPool() {
   pool.clear()
+  if (sqlitePersistence) clearStoredCandidates()
 }

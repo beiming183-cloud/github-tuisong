@@ -1,10 +1,10 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import QRCode from 'qrcode'
 import { TelegramClient } from 'telegram'
 import { StringSession } from 'telegram/sessions/index.js'
+import { resolveDataDir } from './store.js'
 
 type TelegramUser = {
   id: string
@@ -24,9 +24,7 @@ type LoginState = {
 
 const apiId = Number(process.env.TELEGRAM_API_ID ?? 0)
 const apiHash = process.env.TELEGRAM_API_HASH ?? ''
-const currentDir = path.dirname(fileURLToPath(import.meta.url))
-const projectDir = path.resolve(currentDir, '..')
-const dataDir = path.join(projectDir, 'data')
+const dataDir = resolveDataDir()
 const sessionFile = path.join(dataDir, 'telegram-session.json')
 
 let activeClient: TelegramClient | undefined

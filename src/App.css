@@ -84,9 +84,6 @@ h1 em { color: var(--coral-dark); font-style: italic; }
 .card-title-button:hover { color: var(--coral-dark); }
 .card-summary { color: var(--ink-soft); font-size: 14px; line-height: 1.7; }
 .feature-content .card-summary { max-width: 480px; font-size: 15px; }
-.why-block { margin: 20px 0; padding: 14px 15px; border-left: 3px solid var(--coral); background: #fbf1eb; }
-.why-block span { display: block; margin-bottom: 7px; color: var(--coral-dark); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.why-block p { margin: 0; color: #63493f; font-size: 13px; line-height: 1.62; }
 .tag-row { margin-top: auto; padding-top: 18px; }
 .tag { line-height: 25px; font-size: 11px; }
 .card-facts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; color: var(--teal); font-size: 11px; }
@@ -149,6 +146,12 @@ h1 em { color: var(--coral-dark); font-style: italic; }
 .oauth-button:hover { background: var(--surface-muted); border-color: #c9c1b6; }
 .privacy-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 23px; color: var(--ink-faint); font-size: 11px; line-height: 1.6; }
 .privacy-note svg { flex: none; margin-top: 1px; color: var(--teal); }
+.telegram-public-section { margin: 22px 0 18px; padding: 16px; background: #f7f3eb; border: 1px solid var(--line); border-radius: 10px; }
+.telegram-public-section strong { display: block; margin: 5px 0 4px; color: var(--ink); font-size: 15px; }
+.telegram-public-section .dialog-copy { margin: 0 0 10px; font-size: 12px; }
+.telegram-channel-input { display: block; width: 100%; min-height: 92px; padding: 10px 12px; resize: vertical; line-height: 1.5; }
+.telegram-public-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.dialog-hint { margin: 9px 0 0; color: var(--teal); font-size: 12px; line-height: 1.5; }
 .dialog-error { margin: 13px 0 0; padding: 10px 12px; color: #8c4638; background: var(--coral-soft); border-radius: 7px; font-size: 12px; line-height: 1.55; }
 .spin { animation: spin 800ms linear infinite; }
 .telegram-icon { color: #155f76; background: #e8f5f5; }
@@ -197,12 +200,6 @@ h1 em { color: var(--coral-dark); font-style: italic; }
 .compare-empty { display: grid; justify-items: center; gap: 7px; padding: 42px 20px 35px; color: var(--teal); text-align: center; }
 .compare-empty p { margin: 7px 0 0; color: var(--ink); font-family: 'Libre Baskerville', serif; font-size: 18px; }
 .compare-empty span { color: var(--ink-faint); font-size: 12px; }
-
-/* 「这张卡片是怎么来的」：推荐透明度，刻意做得比 why-block 更轻 */
-.reason-breakdown { margin: 0 0 20px; padding: 13px 15px; background: #f4f1e9; border: 1px dashed #d9d2c2; border-radius: 8px; }
-.reason-breakdown > span { display: block; margin-bottom: 9px; color: var(--ink-faint); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.reason-breakdown ul { margin: 0; padding-left: 17px; color: var(--ink-soft); font-size: 12px; line-height: 1.7; }
-.reason-breakdown li + li { margin-top: 3px; }
 
 /* 「我的兴趣」画像 */
 .profile-lines { margin: 0 0 20px; border-top: 1px solid var(--line); }

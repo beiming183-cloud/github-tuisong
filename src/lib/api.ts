@@ -26,16 +26,40 @@ export const api = {
   telegramLoginStart: () => request<{ id: string; status: 'waiting' | 'connected' | 'error'; qrUrl?: string; expiresAt?: number; user?: TelegramStatus['user']; error?: string }>('/api/telegram/login/start', { method: 'POST' }),
   telegramLoginStatus: (id: string) => request<{ id: string; status: 'waiting' | 'connected' | 'error'; qrUrl?: string; expiresAt?: number; user?: TelegramStatus['user']; error?: string }>(`/api/telegram/login/${encodeURIComponent(id)}`),
   telegramLogout: () => request<void>('/api/telegram/logout', { method: 'POST' }),
+  telegramPublicStatus: () => request<{
+    configured: boolean
+    channels: Array<{ username: string; url: string; lastMessageId: number | null; lastFetchedAt: string | null; lastCandidateCount: number; lastError: string | null }>
+    lastSyncAt: string | null
+    lastSyncOk: boolean | null
+    lastError: string | null
+  }>('/api/telegram/public/status'),
+  telegramPublicChannels: (channels: string[]) => request<{ channels: string[] }>('/api/telegram/public/channels', {
+    method: 'PUT',
+    body: JSON.stringify({ channels }),
+  }),
+  telegramPublicSync: (channels?: string[], limit = 40) => request<{
+    messagesRead: number
+    channelResults: Array<{ username: string; messagesRead: number; candidates: number; lastMessageId: number | null; error?: string }>
+    candidates: Tool[]
+    pool: { size: number; added: number; duplicates: number }
+  }>('/api/telegram/public/sync', {
+    method: 'POST',
+    body: JSON.stringify({ channels, limit }),
+  }),
   aiConfig: () => request<{ provider: string; configured: boolean; model: string }>('/api/ai/config'),
   publicStars: (username: string) => request<{ username: string; tools: Tool[] }>(`/api/github/stars?username=${encodeURIComponent(username)}`),
   myStars: () => request<{ username: string; tools: Tool[] }>('/api/github/me/stars'),
+  backfillGitHub: (limit = 20) => request<{ attempted: number; updated: number; failed: number; remaining: number }>('/api/github/backfill', {
+    method: 'POST',
+    body: JSON.stringify({ limit }),
+  }),
   importRepository: (url: string) => request<{ tool: Tool }>('/api/github/repository', {
     method: 'POST',
     body: JSON.stringify({ url }),
   }),
   similar: (owner: string, repo: string) => request<{ source: string; tools: Tool[] }>(`/api/github/similar?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`),
   discoverGitHub: (query = '') => request<{ source: string; query: string; tools: Tool[]; pool?: { size: number; added: number; duplicates: number } }>(`/api/discover/github${query ? `?q=${encodeURIComponent(query)}` : ''}`),
-  enrich: (tools: Tool[]) => request<{ configured: boolean; model?: string; patches: Array<Pick<Tool, 'id' | 'title' | 'summary' | 'why' | 'tags' | 'fit' | 'difficulty' | 'value'>> }>('/api/ai/enrich', {
+  enrich: (tools: Tool[]) => request<{ configured: boolean; model?: string; patches: Array<Pick<Tool, 'id' | 'title' | 'summary' | 'tags' | 'fit' | 'difficulty' | 'value'>> }>('/api/ai/enrich', {
     method: 'POST',
     body: JSON.stringify({ tools }),
   }),
@@ -45,5 +69,19 @@ export const api = {
   recordEvents: (events: Array<{ toolId: string; event: UserEventName; sourceKind?: Tool['sourceKind']; sourceId?: string; tags?: string[] }>) =>
     request<{ stored: number; rejected: number }>('/api/events', { method: 'POST', body: JSON.stringify({ events }) }),
   profile: () => request<ProfileSummary>('/api/profile'),
+  feed: (cursor = '', limit = 20) => request<{
+    source: string
+    hasProfile: boolean
+    considered: number
+    pending: number
+    items: Tool[]
+    nextCursor: string | null
+    hasMore: boolean
+  }>('/api/feed?limit=' + limit + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '')),
+  related: (projectId: string) => request<{ source: string; tools: Tool[] }>('/api/projects/' + encodeURIComponent(projectId) + '/related'),
+  feedback: (tool: Tool, event: UserEventName) => request<{ stored: number }>('/api/feedback', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: tool.id, event, sourceKind: tool.sourceKind, sourceId: tool.sourceId, tags: tool.tags }),
+  }),
   recommend: (limit = 12) => request<{ source: string; hasProfile: boolean; updatedAt: string | null; considered: number; tools: Tool[] }>(`/api/recommend?limit=${limit}`),
 }
