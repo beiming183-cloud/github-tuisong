@@ -127,7 +127,7 @@ export function ProfileDialog({ summary, onClose }: ProfileDialogProps) {
                 ))}
               </dl>
             )}
-            <div className="privacy-note"><ShieldCheck size={16} /><span>这些记录只存在你自己的电脑上（<code>data/events.json</code>），不会上传，也不会写进代码仓库。</span></div>
+            <div className="privacy-note"><ShieldCheck size={16} /><span>这些记录只存在你自己的电脑上（<code>data/openradar.sqlite</code>），不会上传，也不会写进代码仓库。</span></div>
           </>}
       </section>
     </div>
