@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import express, { type NextFunction, type Request, type Response } from 'express'
 import { deepSeekConfig, enrichTools, type AiToolInput } from './ai.js'
 import { analysisBacklog, runAnalysisBatch, selectAnalysisBatch } from './analysis.js'
+import { planMining, runMiningBatch } from './mining.js'
 import { applyAiPatches, enableCandidatePersistence, findPoolEntryById, listPool, poolStats, upsertCandidates } from './candidates.js'
 import {
   candidateToTool,
@@ -160,6 +161,36 @@ function getSession(request: Request) {
   return id ? sessions.get(id) : undefined
 }
 
+/**
+ * 取一个已保存的 GitHub 会话，给没有 Cookie 的后台任务用（暂存区回采、定时同步）。
+ *
+ * 为什么需要：`getSession` 依赖浏览器 Cookie，而后台批量任务没有浏览器。
+ * 之前回填接口也走 Cookie，所以从命令行触发时永远拿不到 Token，只能靠
+ * 未认证的 60 次/小时，1271 个仓库要跑 21 小时。
+ *
+ * 安全性：这是单用户本地工具，API 只监听 127.0.0.1，而且 data/sessions.json
+ * 本来就在本机磁盘上、token 也是加密的——所以这不额外扩大攻击面。
+ * 但仍然只在服务端内部使用，不通过任何接口把会话内容暴露出去。
+ */
+function getStoredSession(): Session | undefined {
+  let newest: Session | undefined
+  for (const session of sessions.values()) {
+    if (!newest || session.createdAt > newest.createdAt) newest = session
+  }
+  return newest
+}
+
+/** 优先用请求里的会话，其次回落到本机保存的会话。拿不到 Token 就返回 undefined。 */
+async function resolveGitHubToken(request: Request): Promise<string | undefined> {
+  const session = getSession(request) ?? getStoredSession()
+  if (!session) return undefined
+  try {
+    return await refreshSessionIfNeeded(session)
+  } catch {
+    return undefined
+  }
+}
+
 async function refreshSession(session: Session) {
   if (!session.refreshToken || !githubClientId || !githubClientSecret) return session.accessToken
   if (session.refreshTokenExpiresAt && session.refreshTokenExpiresAt <= Date.now()) {
@@ -244,6 +275,33 @@ app.post('/api/ai/enrich', asyncRoute(async (request, response) => {
   const patches = await enrichTools(tools)
   const stored = applyAiPatches(patches)
   response.json({ provider: 'deepseek', configured: true, model: deepSeekConfig.model, patches, stored })
+}))
+
+/**
+ * 暂存区回采状态。只读，不发请求。
+ */
+app.get('/api/mining/status', (_request, response) => {
+  const plan = planMining()
+  response.json({
+    ...plan,
+    githubConnected: Boolean(getStoredSession()),
+  })
+})
+
+/**
+ * 跑一批回采：把暂存区里从未入池的 GitHub 项目抓成候选。
+ *
+ * 和 /api/analysis/run 一样默认 dryRun，必须显式传 `"dryRun": false` 才会真的抓。
+ * 天生可续跑：已入池的会被 canonicalUrl 去重跳过。
+ */
+app.post('/api/mining/run', asyncRoute(async (request, response) => {
+  const token = await resolveGitHubToken(request)
+  const result = await runMiningBatch({
+    limit: request.body?.limit,
+    token,
+    dryRun: request.body?.dryRun !== false,
+  })
+  response.json({ ...result, authenticated: Boolean(token) })
 }))
 
 /**
@@ -614,7 +672,7 @@ app.get('/api/discover/github', asyncRoute(async (request, response) => {
 
 /** 回填 Telegram 或其他来源因 GitHub 限流而暂存的项目。 */
 app.post('/api/github/backfill', asyncRoute(async (request, response) => {
-  const session = getSession(request)
+  const session = getSession(request) ?? getStoredSession()
   const limit = Math.min(Math.max(Number(request.body?.limit ?? 20), 1), 50)
   const pending = listPool(100_000).filter((entry) => entry.candidate.status === 'pending').slice(0, limit)
   let updated = 0

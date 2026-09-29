@@ -12,42 +12,99 @@
 
 ---
 
-## 进度快照（2026-09-29）
+## 进度快照与下一位 AI 的工作规范（2026-09-29 收尾）
 
 **当前状态：`main` 与 `origin/main` 一致，没有未推送提交。**（用 `git log -1 --oneline` 看确切提交号；本文档不写死哈希，因为写下它本身就会产生新提交。）
 
-### 两个代理的交接已完成
+### 一、现在的真实数字
 
-2026-09-28 到 09-29 期间，Codex 和另一个代理在同一个仓库里并行开发过。现在 Codex **已经收尾**，它的成果由接手方一并落库。按时间顺序：
+| 项 | 数量 | 说明 |
+|---|---|---|
+| 候选池 | **965** | 已持久化在 `data/openradar.sqlite` |
+| 已生成中文卡片 | **132** | 用的是 prompt `v3` |
+| 待分析 | **829** | 回采刚放进来的，还没有中文卡片 |
+| 已过滤 | 4 | 免费节点/代理订阅类，不进推荐流 |
+| 待回采 | **409** | 暂存区里还没挖出来的 GitHub 项目 |
+| 暂存消息 | 3227 | 提到过 1323 个仓库，其中 914 个已在池中 |
+| 凭证 | DeepSeek 已配置、GitHub 已连接 | 都能直接用 |
+
+### 二、下一位 AI 先跑这两条（可复制粘贴）
+
+这两件事是当前最大且最确定的工作量，**不需要任何判断，直接跑**：
+
+```powershell
+# 1. 继续回采剩余的 409 个（默认 dryRun，必须显式传 dryRun:false）
+$base = 'http://127.0.0.1:5173'
+while ($true) {
+  $r = Invoke-RestMethod -Uri "$base/api/mining/run" -Method POST `
+       -Body (@{ limit = 40; dryRun = $false } | ConvertTo-Json) -ContentType 'application/json' -TimeoutSec 300
+  "[mining] added=$($r.added) skipped=$($r.skipped) failed=$($r.failed) remaining=$($r.remaining)"
+  if ($r.remaining -eq 0 -or $r.rateLimited -or $r.attempted -eq 0) { break }
+}
+
+# 2. 继续分析剩下的 829 个
+while ($true) {
+  $r = Invoke-RestMethod -Uri "$base/api/analysis/run" -Method POST `
+       -Body (@{ limit = 8; dryRun = $false } | ConvertTo-Json) -ContentType 'application/json' -TimeoutSec 200
+  "[analysis] applied=$($r.applied) skipped=$($r.skipped) remaining=$($r.remaining) err=$($r.error)"
+  if ($r.remaining -eq 0 -or $r.attempted -eq 0 -or $r.error) { break }
+}
+```
+
+跑之前先确认服务在跑（`npm run dev`）。**先回采再分析**——分析是花钱的一步，回采不是。
+
+参考耗时：回采 40 个/批约 10 秒；分析 8 个/批约 15-20 秒。829 个分析大约需要 30-40 分钟，建议放后台跑，不要卡在对话里。
+
+### 三、这两件事跑完之后做什么
+
+按优先级：
+
+1. **用浏览器看一眼真实效果**（第 5.6 节记录了方法：Chrome `--headless` 截图 + CDP 点击，不需要装任何包）。候选池从 965 涨到上千之后，首页的排序和多样性才是第一次被真正检验。
+2. **P1：补第二个来源连接器**（RSS / Hacker News / Product Hacker，照 `server/connectors/github.ts` 的形状写）。目前只有 GitHub 和 Telegram 两个来源，推荐流的来源多样性规则还没有被真正激活。
+3. **推送任务**：按分类、兴趣、新鲜度和来源可信度生成摘要，不要一次把新项目全推。
+4. **仍然没做的**：浏览器手动验证的剩余条目（GitHub 登录态、Telegram 弹窗、图片失败后备、我的收藏页、从链接导入）；比较结果持久化；多用户。
+
+### 四、硬性规则（都是踩过坑换来的，不要绕过）
+
+**关于 Git**
+
+1. **禁止 `git add -A` / `git add .`**，只能按路径显式暂存（`git add -- 路径`），提交前打印 `git diff --cached --name-only` 核对。这条是因为真的把并行代理未提交的文件卷进过自己的提交。见 15.7 节。
+2. 提交信息要如实：这个仓库里出现过「提交信息说改文档、内容里多了 251 行脚本」的情况。不确定的部分宁可写「未验证」。
+
+**关于数据**
+
+3. **`data/` 是用户真实数据**。跑任何批量 API 之前先设 `OPENRADAR_DATA_DIR` 到临时目录；`npm run smoke` 会自己检查隔离并在未隔离时拒绝执行（退出码 2）。
+4. **备份 `.sqlite` 必须连 `-wal` 和 `-shm` 一起复制**，或者先 `PRAGMA wal_checkpoint(TRUNCATE)`。只复制主文件会丢掉最新事务。见 20.5 节。
+5. 不要去读或粘贴 `data/` 下任何文件内容（行为事件、频道原文都在里面）。
+
+**关于 AI 与去重**
+
+6. **改 prompt 必须同时改 `PROMPT_VERSION`**（`server/ai.ts`），否则缓存命中旧结果、已标 `analyzed` 的候选也不会重算——等于白改。见 10.2 和 20.5 节。
+7. **不要相信「结果里有没有它」来判断做没做过**。仓库会改名/转移，外部标识会变。批量任务需要自己的尝试记录。见 20.5 节。
+8. 用户看得见的文案必须能被代码验证。出现过「通用探索宣称从你感兴趣的项目延伸出来」「画像弹窗写着 data/events.json 但这个文件早就不存在了」这类**不报错但说假话**的问题。
+
+**关于质量**
+
+9. `npm run check`（四套离线用例）+ `npm run build` + `npm run lint` 必须全绿才能提交。
+10. 改 UI 之后**先自己截图看一遍**再交给用户。第 5.6 节有现成方法。不要靠 CSS 宽度计算推断版式——那次方向错了，用户回复「基本没变」。
+11. **做不到的事就写「做不到」**，不要写成已完成。这份手册的价值全在于它说的是真话。
+
+### 五、接手记录（按时间）
+
+2026-09-28 到 09-29 期间 Codex 和另一个代理在同一个仓库里并行开发过。Codex 已收尾，成果由接手方一并落库：
 
 | 提交 | 内容 |
 |---|---|
 | `4d54fa1` | 统一候选 `Candidate` + 来源连接器接口，GitHub 参考实现 + canonicalUrl 去重 |
 | `7b75ad1` | 修复 Vite 只监听 IPv6 导致 `127.0.0.1:5173` 打不开、OAuth 回调失败 |
 | `25f4932` | 行为事件记录 + 第一版可解释兴趣评分 + 多样性重排 + 前端展示 |
-| `9bf7359` | 修复来源解释编造关系（通用探索谎称“从你感兴趣的项目延伸”） |
+| `9bf7359` | 修复来源解释编造关系（通用探索谎称「从你感兴趣的项目延伸」） |
 | `e83a015` | 修正手册过期数字；**此提交被 `git add -A` 污染，内含并行代理的文件** |
 | `78ab951` | 记录并行开发事故与 Telegram 公开频道新路线 |
-| 后续提交 | Codex 的 SQLite 持久化 / feed 分页 / Telegram 公开频道来源，以及接手方的分析队列与隔离修复 |
-
-### 现在可以做什么
-
-- 页面、GitHub 发现、Telegram 公开频道、候选池持久化、行为画像和个性化排序都能跑。
-- `npm run check` 有 103 项离线用例；`npm run smoke` 有 32 项接口断言并带隔离门禁。
-- **待配置**：`DEEPSEEK_API_KEY`（分析队列从未真实跑过）、`TELEGRAM_API_ID`/`API_HASH`（个人账号登录）。
-- **待人工确认**：浏览器手动验证（第 5.4 节），至今无人执行。
-
-**下一步优先级**：
-
-1. 配好 DeepSeek Key，小批跑通分析队列（99 个候选、已分析 0 个）。
-2. 浏览器手动验证第 5.4 节清单。
-3. 回填：等下一次 Telegram 同步撞上 GitHub 限流产生 `pending` 后再验证限流提前停止的行为。
-4. P1：继续补 GitHub 之外的开源社区来源；Telegram 作为补充，不要抢掉主发现入口。
-
-**两条硬规则**（都是踩过坑换来的）：
-
-1. 禁止 `git add -A` / `git add .`，只能按路径显式暂存，提交前核对暂存清单。见 15.7 节。
-2. 声明「用 `OPENRADAR_DATA_DIR` 隔离测试数据」之后必须**实测**，不能只看临时目录里生成了文件。见 17.8 节。
+| `761d1e2` | 落库 Codex 成果（SQLite / feed 分页 / Telegram 公开频道）+ 分析队列与隔离修复 |
+| `72b523e` | 修复卡片图片被裁成碎片（OG 图 1200×630 塞进 136×205 竖条） |
+| `9a99d81` | 首次浏览器交互验证（14 项）+ 修掉画像弹窗过期路径 |
+| `0e10a4f` | 分析质量三修 + prompt 版本号；回采模块与改名死循环修复 |
 
 来源：进度快照按实际仓库状态写，不是回顾记忆。
 
@@ -209,7 +266,12 @@ OpenRadar Personal 不是一个 GitHub 热榜，也不是新闻聚合站。
 - [x] `npm run smoke`：接口级冒烟测试（32 项通过 + 2 项如实 SKIP），带「未隔离就拒绝执行」的硬门禁。
 - [x] `server/analysis.ts` 分析队列：批次有界（默认 6 / 上限 8）、可续跑、默认 dryRun、分析器可注入。
 - [x] `GET /api/analysis/status`、`POST /api/analysis/run`；`server/check-analysis.ts` 40 项离线用例。
-- [x] GitHub 限流识别：`githubRequest` 读取剩余额度与重置时间；回填遇限流提前停止，不再把限流算成失败。
+- [x] `server/mining.ts` 暂存区回采：把已下载但没入池的 GitHub 项目挖成候选；`GET /api/mining/status`、`POST /api/mining/run`。
+- [x] `mining_attempts` 尝试记录表：解决仓库改名导致的去重死循环。
+- [x] `server/contentFilter.ts` 内容过滤：消息正文 + 仓库描述两层，挡掉免费节点/代理订阅列表；`check-content-filter.ts` 20 项用例。
+- [x] prompt 版本号：`metadata.analysisVersion` + `PROMPT_VERSION`，改 prompt 会自动触发重算。
+- [x] GitHub 限流识别：`githubRequest` 读取剩余额度与重置时间；回填与回采遇限流提前停止。
+- [x] 后台任务可用本机保存的 GitHub 会话（`getStoredSession()`），不必依赖浏览器 Cookie。
 - [x] 修复 `ready` 覆盖 `analyzed` 的状态降级，和 Telegram 候选 AI 结果写不回候选池的问题。
 - [x] 修复 `OPENRADAR_DATA_DIR` 隔离失效：所有模块统一用 `store.ts` 的 `resolveDataDir()`；`/api/health` 暴露 `isolated`。
 - [x] README 更新到 V0.6 实际状态：公开频道来源、校验命令、推荐公式、数据与隐私说明。
@@ -837,7 +899,47 @@ type Tool = {
 
 「已分析」判定看 `metadata.analyzedAt`（或旧数据的 `metadata.aiPatch`），而不是只看 `status`——因为 `status` 会被连接器的重新同步影响。
 
-### 8.4 AI
+### 8.4 暂存区回采（2026-09-29 新增）
+
+把「消息已经下载进暂存区、但从未变成候选」的 GitHub 项目挖出来。这是目前把候选池从几百做到上千的主要手段。
+
+#### `GET /api/mining/status`
+
+只读，不发请求。
+
+```json
+{
+  "stagedMessages": 3227,
+  "mentioned": 1323,
+  "alreadyInPool": 914,
+  "toMine": 409,
+  "byChannel": { "github_repositories_bds": 181, "GithubCOTV": 94 },
+  "preview": [{ "url": "https://github.com/owner/repo", "channel": "qumao" }],
+  "githubConnected": true
+}
+```
+
+#### `POST /api/mining/run`
+
+请求体：`{ "limit"?: 1-50, "dryRun"?: boolean }`。**默认 `dryRun: true`**，必须显式传 `"dryRun": false` 才会真抓。
+
+```json
+{
+  "dryRun": false, "authenticated": true,
+  "attempted": 40, "added": 35, "skipped": 5, "failed": 0,
+  "rateLimited": false, "rateLimitResetAt": null,
+  "remaining": 409, "attemptsRecorded": 160
+}
+```
+
+- **可续跑**：已入池的按 canonicalUrl 去重跳过，已尝试过的按 `mining_attempts` 跳过。
+- **限流感知**：遇到限流立刻停止并返回 `rateLimitResetAt`，不把限流算成仓库失败。
+- Token 优先取请求里的会话，其次回落到本机保存的会话（见下面的说明）。
+- 不调用 DeepSeek：只把项目放进候选池，中文卡片交给分析队列。
+
+**关于后台任务怎么拿到 GitHub Token**：`getSession()` 依赖浏览器 Cookie，而后台批量任务没有浏览器。所以新增了 `getStoredSession()`，从本机保存的会话里取最近一个。这是单用户本地工具、API 只监听 127.0.0.1、`data/sessions.json` 本来就在本机磁盘上，因此不额外扩大攻击面；但它只在服务端内部使用，不通过任何接口暴露会话内容。
+
+### 8.5 AI
 
 #### `GET /api/ai/config`
 
@@ -884,7 +986,7 @@ id, title, summary, why, tags, fit, difficulty, value
 
 没有 Key 时返回 `configured: false, patches: []`，前端继续使用本地规则结果。
 
-### 8.5 GitHub
+### 8.6 GitHub
 
 #### `GET /api/github/config`
 
@@ -969,7 +1071,7 @@ id, title, summary, why, tags, fit, difficulty, value
 - 删除本地服务端会话。
 - 清理 Cookie。
 
-### 8.6 Telegram
+### 8.7 Telegram
 
 #### `GET /api/telegram/config`
 
@@ -1003,7 +1105,7 @@ id, title, summary, why, tags, fit, difficulty, value
 - 断开活动客户端。
 - 清除内存状态和加密会话文件。
 
-### 8.7 API 错误约定
+### 8.8 API 错误约定
 
 服务端错误处理中会返回：
 
@@ -1954,6 +2056,27 @@ DeepSeek 用来分析、改写、匹配和比较；被推荐的项目不需要�
 ---
 
 ## 20.5 本轮实现记录（2026-09-29）
+
+### 2026-09-29：回采卡在死循环——仓库改名让去重失效
+
+暂存区还有 1266 个 GitHub 项目从未入池（消息早就下载好了）。写了 `server/mining.ts` 批量回采，跑起来看着很顺：`added=20 skipped=20` 一批批过。但**候选池涨到 891 就不动了**，日志里的 `added` 却还在一直涨。
+
+停下来查，原因是**仓库改名或转移**：
+
+- 频道消息里写的是 `github.com/tiangolo/fastapi`
+- GitHub API 现在返回的 `html_url` 是 `github.com/fastapi/fastapi`（项目已转到新组织）
+
+两者 canonicalUrl 不同，于是：
+
+1. `collectMiningTargets` 用消息里的 URL 查重 → 查不到 → 判定「没挖过」→ 放进批次
+2. 抓取成功 → `upsertCandidates` 按 API 返回的新 URL 去重 → **命中已有记录** → 只更新 `last_seen_at`，池子不增长
+3. 下一批又用旧 URL 查一次 → 还是查不到 → 又进批次
+
+于是同一批目标被反复重试，`added` 每批 +20，池子一动不动，**任务永远不会结束**。
+
+修法：加一张 `mining_attempts` 表，记录「这个目标 URL 尝试过了，结果是入库 / 仓库没了 / 失败」，并保存解析后的真实 URL。回采时先排除已尝试的目标，循环才收敛。修完后 `remaining` 立刻正常下降（529 → 489 → 449 → 409），候选池开始真实增长（891 → 965）。
+
+**教训**：只要去重键是「从外部拿到的标识」，就必须假设它**会变**（改名、转移、大小写、重定向）。判断「这件事做没做过」不能只靠「结果里有没有它」，还要有自己的尝试记录。这和分析队列那个「改了 prompt 却不重算」是同一类错误——**用间接证据代替直接的完成标记**。
 
 ### 2026-09-29：分析质量的三个问题和 prompt 版本号
 

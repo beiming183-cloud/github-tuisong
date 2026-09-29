@@ -97,6 +97,12 @@ function db() {
         payload_json TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS mining_attempts (
+        target_url TEXT PRIMARY KEY,
+        outcome TEXT NOT NULL,
+        resolved_url TEXT,
+        attempted_at TEXT NOT NULL
+      );
     `)
     migrateLegacyJson(database)
   }
@@ -275,4 +281,36 @@ export function setAiCache(key: string, value: unknown) {
   db().prepare(`INSERT INTO ai_cache (cache_key, payload_json, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(cache_key) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at`)
     .run(key, JSON.stringify(value), new Date().toISOString())
+}
+
+export type MiningOutcome = 'added' | 'missing' | 'unusable' | 'failed'
+
+/**
+ * 暂存区回采的尝试记录。
+ *
+ * 为什么不能只靠「候选池里有没有这个 URL」来判断：**仓库会改名或转移**。
+ * 消息里写的是 `github.com/tiangolo/fastapi`，而 API 现在返回
+ * `github.com/fastapi/fastapi`。两者 canonicalUrl 不同，于是这个目标
+ * 永远被当成「还没挖过」，每批都重试一次——报告里 added 一直涨，
+ * 候选池却一动不动，任务陷进死循环。实测就是这么卡住的。
+ *
+ * 记录一次尝试之后，不管结果是入库、仓库没了还是失败，都不会再重复处理。
+ */
+export function recordMiningAttempt(targetUrl: string, outcome: MiningOutcome, resolvedUrl?: string) {
+  db().prepare(`INSERT INTO mining_attempts (target_url, outcome, resolved_url, attempted_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT(target_url) DO UPDATE SET outcome = excluded.outcome, resolved_url = excluded.resolved_url, attempted_at = excluded.attempted_at`)
+    .run(targetUrl, outcome, resolvedUrl ?? null, new Date().toISOString())
+}
+
+export function listMiningAttempts() {
+  const rows = db().prepare('SELECT target_url, outcome, resolved_url FROM mining_attempts').all()
+  return rows.map((row) => ({
+    targetUrl: String(row.target_url),
+    outcome: String(row.outcome) as MiningOutcome,
+    resolvedUrl: row.resolved_url === null ? undefined : String(row.resolved_url),
+  }))
+}
+
+export function miningAttemptCount() {
+  return Number(db().prepare('SELECT COUNT(*) AS c FROM mining_attempts').get()?.c ?? 0)
 }
