@@ -11,6 +11,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Candidate } from './connectors/types.js'
+import { promptVersion } from './ai.js'
 import { clearStoredCandidates, configureStore, listStoredCandidates, replaceStoredCandidates } from './store.js'
 
 export type PooledCandidate = {
@@ -246,7 +247,7 @@ export function applyAiPatches(patches: Array<{ id: string; title?: string; summ
       (toolId !== undefined && item.id === toolId) ||
       item.id === entry.candidate.canonicalUrl)
     if (!patch) continue
-    entry.candidate.metadata = { ...(entry.candidate.metadata ?? {}), aiPatch: patch, analyzedAt: now }
+    entry.candidate.metadata = { ...(entry.candidate.metadata ?? {}), aiPatch: patch, analyzedAt: now, analysisVersion: promptVersion }
     entry.candidate.status = 'analyzed'
     updated += 1
   }
@@ -267,6 +268,7 @@ export function markAnalysisSkipped(canonicalUrl: string, reason = '本轮没有
     ...(entry.candidate.metadata ?? {}),
     analysisSkipped: reason,
     analyzedAt: new Date().toISOString(),
+    analysisVersion: promptVersion,
   }
   entry.candidate.status = 'analyzed'
   persistPool()

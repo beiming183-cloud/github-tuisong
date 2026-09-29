@@ -12,6 +12,7 @@ import { promisify } from 'node:util'
 import type { Candidate, FetchCandidatesInput, FetchCandidatesResult, SourceConnector } from './types.js'
 import { githubRequest, isUsableRepo, parseGitHubRepository, repoToCandidate, type GitHubRepo } from './github.js'
 import { stageTelegramMessages } from '../staging.js'
+import { looksLikePromotion } from '../contentFilter.js'
 import { resolveDataDir } from '../store.js'
 
 const execFileAsync = promisify(execFile)
@@ -179,14 +180,7 @@ export function inferGitHubLinks(text: string) {
 
 /** 资源频道常见的广告模式；命中后只暂存，不进入候选推荐。 */
 export function isLikelyAdvertisement(text: string) {
-  const normalized = text.toLowerCase()
-  const patterns = [
-    /机场|节点|梯子|翻墙|加速器|vpn|v\s*p\s*n|代理订阅|科学上网/iu,
-    /优惠码|折扣码|注册码|注册送|注册即送|限时优惠|年付|月付/iu,
-    /广告合作|商务合作|推广|赞助|推广链接|点击购买|立即购买/iu,
-  ]
-  const hits = patterns.reduce((count, pattern) => count + (pattern.test(normalized) ? 1 : 0), 0)
-  return hits >= 1 && (normalized.length < 1200 || hits >= 2)
+  return looksLikePromotion(text)
 }
 
 function extractLinks(block: string, text: string, username: string) {

@@ -8,6 +8,7 @@
  * 运行：npm run check
  */
 import { analysisBacklog, analysisStateOf, candidateToAiInput, clampBatchSize, runAnalysisBatch, selectAnalysisBatch } from './analysis.js'
+import { promptVersion } from './ai.js'
 import { applyAiPatches, clearPool, findInPool, listPool, mergeStatus, upsertCandidates } from './candidates.js'
 import type { Candidate } from './connectors/types.js'
 
@@ -168,12 +169,26 @@ const input = candidateToAiInput(listPool(1)[0])
 check('rawText 没有被送进 AI 输入', 'rawText' in input, false)
 checkTrue('但名字/标签/仓库信息在', input.name.startsWith('repo-') && input.tags.length === 1 && Boolean(input.repository))
 
-console.log('\n— analysisStateOf 对旧数据的兼容 —')
+console.log('\n— prompt 改版必须触发重算 —')
+// 没有这一条，「升级 prompt」永远不生效：候选已被标成 analyzed，
+// 队列认为无事可做，改了 prompt 也只是白改。这是实际踩过的坑。
 clearPool()
-upsertCandidates([makeCandidate(), { ...makeCandidate(), metadata: { repoId: 4242, owner: 'o', name: 'old', fullName: 'o/old', stars: 1, language: null, topics: [], updatedAt: new Date().toISOString(), aiPatch: { id: 'x' } } }])
+const now = new Date().toISOString()
+const withAnalysis = (repoId: number, extra: Record<string, unknown>) => makeCandidate({
+  canonicalUrl: `https://github.com/owner/ver-${repoId}`,
+  sourceItemId: `github-${repoId}`,
+  metadata: { repoId, owner: 'o', name: `ver-${repoId}`, fullName: `o/ver-${repoId}`, stars: 1, language: null, topics: [], updatedAt: now, aiPatch: { id: `github-${repoId}`, title: 't', summary: 's' }, analyzedAt: now, ...extra },
+})
+upsertCandidates([
+  withAnalysis(1, { analysisVersion: promptVersion }),   // 当前版本 → 已分析
+  withAnalysis(2, {}),                                    // 旧数据没有版本号 → 要重算
+  withAnalysis(3, { analysisVersion: 'v1' }),             // 更早的版本 → 要重算
+  makeCandidate(),                                        // 从没分析过 → 要分析
+])
 const states = listPool(10).map((entry) => analysisStateOf(entry))
-checkTrue('只有 aiPatch 没有 analyzedAt 的旧数据也算已分析', states.includes('analyzed'))
-check('另一个仍是待分析', states.filter((state) => state === 'needsAnalysis').length, 1)
+check('当前 prompt 版本的算已分析', states.filter((s) => s === 'analyzed').length, 1)
+check('旧版本 / 无版本 / 未分析的都要重算', states.filter((s) => s === 'needsAnalysis').length, 3)
+check('批次会选出这 3 个', selectAnalysisBatch(8).length, 3)
 
 clearPool()
 console.log(`\n${failures === 0 ? '全部通过' : `${failures} 项失败`}`)

@@ -17,7 +17,7 @@
  */
 import type { PooledCandidate } from './candidates.js'
 import { applyAiPatches, listPool, markAnalysisSkipped } from './candidates.js'
-import { deepSeekConfig, enrichTools, type AiToolInput, type AiToolPatch } from './ai.js'
+import { deepSeekConfig, enrichTools, promptVersion, type AiToolInput, type AiToolPatch } from './ai.js'
 import { candidateToRepo } from './connectors/github.js'
 
 /** 单批默认值。DeepSeek 那条路径一次最多收 8 个，这里默认更保守。 */
@@ -38,9 +38,13 @@ export function analysisStateOf(entry: PooledCandidate): AnalysisState {
   if (status === 'pending' || status === 'raw' || status === 'staged' || status === 'filtered' || status === 'dismissed' || status === 'failed') {
     return 'notEligible'
   }
-  // 兼容旧数据：早期版本只写了 aiPatch，没有写 analyzedAt。
-  if (entry.candidate.metadata?.analyzedAt || entry.candidate.metadata?.aiPatch) return 'analyzed'
-  return 'needsAnalysis'
+  const meta = entry.candidate.metadata
+  const analyzed = Boolean(meta?.analyzedAt || meta?.aiPatch)
+  if (!analyzed) return 'needsAnalysis'
+  // Prompt 改版后，旧版本产出的卡片必须重算。
+  // 没有这一步的话「升级 prompt」永远不会生效：候选已经被标成 analyzed，
+  // 队列会认为无事可做，改了 prompt 也只是白改。
+  return meta?.analysisVersion === promptVersion ? 'analyzed' : 'needsAnalysis'
 }
 
 export type AnalysisBacklog = {

@@ -8,6 +8,7 @@
  *
  * 不在这里做：OAuth、会话加密、推荐排序、UI 文案组合。
  */
+import { isFreeResourceRepo, promotionReason } from '../contentFilter.js'
 import type { Candidate, FetchCandidatesInput, FetchCandidatesResult, SourceConnector, ToolCard } from './types.js'
 
 export const GITHUB_API = 'https://api.github.com'
@@ -108,6 +109,10 @@ export function isUsableRepo(repo: GitHubRepo) {
 }
 
 export function repoToCandidate(repo: GitHubRepo, sourceId = 'github-discovery', sourceLabel = 'GitHub 项目'): Candidate {
+  // 「免费节点 / 代理订阅列表」这类仓库不是工具，只是不断刷新的资源列表。
+  // 标记成 filtered 而不是丢弃：记录留着，但不进推荐流（/api/feed 只看 ready / analyzed）。
+  // 必须在仓库这一层过滤——只看频道正文会漏掉「正文只丢了个链接」的情况。
+  const filtered = isFreeResourceRepo(repo)
   const metadata: GitHubCandidateMetadata = {
     repoId: repo.id,
     owner: repo.owner.login,
@@ -117,6 +122,7 @@ export function repoToCandidate(repo: GitHubRepo, sourceId = 'github-discovery',
     language: repo.language,
     topics: repo.topics ?? [],
     updatedAt: repo.pushed_at,
+    ...(filtered ? { filteredReason: promotionReason(repo) } : {}),
   }
   return {
     canonicalUrl: repo.html_url,
@@ -127,7 +133,7 @@ export function repoToCandidate(repo: GitHubRepo, sourceId = 'github-discovery',
     sourceId,
     sourceLabel,
     sourcePublishedAt: repo.pushed_at,
-    status: 'ready',
+    status: filtered ? 'filtered' : 'ready',
     // 与 repoToTool 用的是同一套分类，保证评分标签和卡片标签一致。
     tags: classifyRepo(repo).tags.slice(0, 3),
     metadata,
