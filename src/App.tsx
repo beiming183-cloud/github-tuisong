@@ -395,7 +395,33 @@ function ToolCard({ tool, ...props }: CardProps) {
 }
 
 function CardActions({ tool, saved, liked, starred, compared, onSave, onLike, onStar, onCompare, onSimilar, onSkip, onOpen, onOpenSource, compact = false }: CardProps & { compact?: boolean }) {
-  return <div className="card-actions"><button className={liked ? 'icon-button selected' : 'icon-button'} onClick={onLike} aria-label={liked ? '取消喜欢' : '喜欢'} aria-pressed={liked}><Heart size={17} fill={liked ? 'currentColor' : 'none'} /></button><button className={saved ? 'icon-button selected' : 'icon-button'} onClick={onSave} aria-label={saved ? '取消收藏' : '收藏'} aria-pressed={saved}><Bookmark size={17} fill={saved ? 'currentColor' : 'none'} /></button><button className={starred ? 'icon-button selected' : 'icon-button'} onClick={onStar} aria-label={starred ? '取消 GitHub Star' : 'GitHub Star'} aria-pressed={starred}><GitBranch size={17} /></button><button className="icon-button" onClick={onSkip} aria-label={`跳过 ${tool.name}`}><EyeOff size={17} /></button>{!compact && <button className={compared ? 'secondary-action selected' : 'secondary-action'} onClick={onCompare}>{compared ? <Check size={15} /> : <span>＋</span>} 比较</button>}<button className="secondary-action" onClick={onOpen}>看详情</button><button className="secondary-action" onClick={onSimilar}>找相似 <ArrowUpRight size={15} /></button><a className="open-link" href={tool.source} target="_blank" rel="noreferrer" onClick={onOpenSource} aria-label={`打开 ${tool.name}`}><ExternalLink size={16} /></a></div>
+  const iconButtons = <>
+    <button className={liked ? 'icon-button selected' : 'icon-button'} onClick={onLike} aria-label={liked ? '取消喜欢' : '喜欢'} aria-pressed={liked}><Heart size={17} fill={liked ? 'currentColor' : 'none'} /></button>
+    <button className={saved ? 'icon-button selected' : 'icon-button'} onClick={onSave} aria-label={saved ? '取消收藏' : '收藏'} aria-pressed={saved}><Bookmark size={17} fill={saved ? 'currentColor' : 'none'} /></button>
+    <button className={starred ? 'icon-button selected' : 'icon-button'} onClick={onStar} aria-label={starred ? '取消 GitHub Star' : 'GitHub Star'} aria-pressed={starred}><GitBranch size={17} /></button>
+    <button className="icon-button" onClick={onSkip} aria-label={`跳过 ${tool.name}`}><EyeOff size={17} /></button>
+  </>
+  const openLink = <a className="open-link" href={tool.source} target="_blank" rel="noreferrer" onClick={onOpenSource} aria-label={`打开 ${tool.name}`}><ExternalLink size={16} /></a>
+
+  // 侧边卡片的内容区只有约 270px，塞不下「比较 + 看详情 + 找相似 + 打开」。
+  // 硬塞会折成三行、图标被 margin-left:auto 甩到奇怪的位置（就是之前看到的“按钮排乱”）。
+  // 所以侧边卡片只留最必要的两个动作，比较和找相似仍然在详情弹窗里（点标题即可进入）。
+  if (compact) {
+    return <div className="card-actions compact-actions">
+      {iconButtons}
+      <span className="actions-break" aria-hidden="true" />
+      <button className="secondary-action" onClick={onOpen}>看详情</button>
+      {openLink}
+    </div>
+  }
+
+  return <div className="card-actions">
+    {iconButtons}
+    <button className={compared ? 'secondary-action selected' : 'secondary-action'} onClick={onCompare}>{compared ? <Check size={15} /> : <span>＋</span>} 比较</button>
+    <button className="secondary-action" onClick={onOpen}>看详情</button>
+    <button className="secondary-action" onClick={onSimilar}>找相似 <ArrowUpRight size={15} /></button>
+    {openLink}
+  </div>
 }
 
 export default App

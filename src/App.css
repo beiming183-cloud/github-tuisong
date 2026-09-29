@@ -57,15 +57,27 @@ h1 em { color: var(--coral-dark); font-style: italic; }
 .section-heading h2 { margin: 0; font-family: 'Libre Baskerville', 'PingFang SC', 'Microsoft YaHei', serif; font-size: clamp(28px, 4vw, 42px); line-height: 1.2; letter-spacing: -.05em; font-weight: 400; }
 .feed-meta { display: flex; align-items: center; gap: 8px; color: var(--ink-faint); font-size: 12px; }
 .live-mark { width: 6px; height: 6px; background: var(--teal); }
-.feed-layout { display: grid; grid-template-columns: minmax(0, 1.22fr) minmax(320px, .78fr); gap: 20px; max-width: 1120px; margin: 0 auto; align-items: start; }
+/* 单列容器：主卡通栏 + 其余卡片两列网格。
+   原来是「左列主卡 / 右列卡片堆」，主卡高度固定而右列无限长，
+   左侧会留下一大片空白，看起来像没加载完。 */
+.feed-layout { display: grid; grid-template-columns: 1fr; gap: 20px; max-width: 1120px; margin: 0 auto; align-items: start; }
 .feature-card, .tool-card { background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
-.feature-card { display: grid; grid-template-columns: .95fr 1.05fr; min-height: 470px; overflow: hidden; border-radius: 13px 13px 13px 3px; }
-.tool-card { display: grid; grid-template-columns: 136px 1fr; min-height: 205px; overflow: hidden; border-radius: 10px 10px 10px 3px; transition: transform 200ms ease-out, box-shadow 200ms ease-out; }
+/* 主卡改成横排但让图片列自己撑到原生比例，高度由内容决定，不再固定 470px。 */
+.feature-card { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); overflow: hidden; border-radius: 13px 13px 13px 3px; }
+/* 注意：这里不能再给图片容器设 min-height。
+   `aspect-ratio` 加上一个确定的高度会反推出宽度（470 × 1200/630 = 894px），
+   而网格列的 minmax(0, …) 只管轨道不管项目，图片就会溢出 574px 的列并盖住右边文字。
+   高度完全交给 aspect-ratio 决定。 */
+.feature-card .tool-image { aspect-ratio: 1200 / 630; align-self: center; min-width: 0; }
+/* 侧边卡片：图片改成上方通栏，按 GitHub OG 图的原生比例（1200×630）显示。
+   原来图片是左侧 136px 宽的竖长条，用 object-fit:cover 把横向 banner 放大并裁掉约 65%，
+   结果只剩「seque」「ter」这种半截字母，看起来就像文字被截断了。 */
+.tool-card { display: block; overflow: hidden; border-radius: 10px 10px 10px 3px; transition: transform 200ms ease-out, box-shadow 200ms ease-out; }
 .tool-card:hover { transform: translateY(-2px); box-shadow: 0 14px 32px rgba(41, 38, 31, .12); }
-.side-feed { display: grid; gap: 20px; }
-.tool-image { position: relative; min-height: 205px; overflow: hidden; background: #dbe5e0; }
-.tool-image.large { min-height: 470px; }
-.tool-image img { width: 100%; height: 100%; display: block; object-fit: cover; transition: transform 450ms ease-out; }
+.side-feed { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.tool-image { position: relative; overflow: hidden; background: #f2efe7; }
+.tool-card .tool-image { aspect-ratio: 1200 / 630; }
+.tool-image img { width: 100%; height: 100%; display: block; object-fit: contain; transition: transform 450ms ease-out; }
 .tool-card:hover .tool-image img, .feature-card:hover .tool-image img { transform: scale(1.025); }
 .image-source { position: absolute; left: 14px; bottom: 14px; padding: 5px 8px; color: #fffdf8; background: rgba(30, 40, 37, .78); border-radius: 4px; font-size: 10px; letter-spacing: .04em; }
 .tool-image.fallback { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--ink); font-family: 'Libre Baskerville', serif; font-size: 18px; }
@@ -75,8 +87,12 @@ h1 em { color: var(--coral-dark); font-style: italic; }
 .feature-content, .tool-card-content { min-width: 0; }
 .feature-content { display: flex; flex-direction: column; padding: 31px; }
 .tool-card-content { display: flex; flex-direction: column; padding: 20px 20px 18px; }
-.card-topline { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--ink-faint); font-size: 11px; line-height: 1.4; letter-spacing: .02em; }
-.card-topline > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 元信息（语言 · Star 数）不要用省略号截断。
+   侧边卡片内容区只有两三百像素，右边还压着「很适合试试」这类标签，
+   加上 nowrap + ellipsis 之后几乎每张卡片的这行都会变成「TypeScript · 1,…」。
+   允许换行比截断更好读。 */
+.card-topline { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--ink-faint); font-size: 11px; line-height: 1.4; letter-spacing: .02em; }
+.card-topline > span:first-child { min-width: 0; }
 .match-label { flex: none; color: var(--coral-dark); font-weight: 700; }
 .feature-content h3 { max-width: 530px; margin: 28px 0 17px; color: var(--ink); font-family: 'Libre Baskerville', 'PingFang SC', 'Microsoft YaHei', serif; font-size: clamp(27px, 3vw, 38px); line-height: 1.32; letter-spacing: -.045em; font-weight: 400; }
 .tool-card-content h3 { margin: 17px 0 9px; color: var(--ink); font-family: 'Libre Baskerville', 'PingFang SC', 'Microsoft YaHei', serif; font-size: 22px; line-height: 1.42; letter-spacing: -.035em; font-weight: 400; }
@@ -95,6 +111,11 @@ h1 em { color: var(--coral-dark); font-style: italic; }
 .secondary-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 44px; padding: 0 10px; color: var(--ink-soft); border: 1px solid var(--line); background: var(--surface); border-radius: 7px; font-size: 11px; transition: color 180ms ease-out, background 180ms ease-out, transform 180ms ease-out; }
 .secondary-action:hover, .secondary-action.selected { color: var(--teal); background: var(--teal-soft); transform: translateY(-1px); }
 .open-link { margin-left: auto; }
+/* 侧边卡片的操作行刻意排成两行：第一行 4 个图标，第二行「看详情」+ 打开链接。
+   靠这个强制换行元素保证断点固定，不再依赖宽度算出来的偶然折行。 */
+.actions-break { flex-basis: 100%; height: 0; }
+.compact-actions { row-gap: 7px; }
+.compact-actions .secondary-action { padding: 0 12px; }
 .empty-state { display: grid; justify-items: center; gap: 12px; max-width: 1120px; margin: 0 auto; padding: 72px 24px; color: var(--ink-soft); text-align: center; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
 .empty-state svg { color: var(--teal); }
 .empty-state h3 { margin: 6px 0 0; color: var(--ink); font-family: 'Libre Baskerville', serif; font-size: 24px; font-weight: 400; }
@@ -220,7 +241,10 @@ h1 em { color: var(--coral-dark); font-style: italic; }
   .masthead-actions .quiet-button { display: none; }
   .intro-grid { gap: 42px; }
   .feed-layout { grid-template-columns: 1fr; }
-  .side-feed { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* 侧边卡片要放得下第一行那 4 个 44px 图标，卡片净宽至少要 ~375px
+     （136 图片 + 2 边框 + 40 内边距 + 197 操作行）。
+     固定写 repeat(2, 1fr) 在 721~850px 这段会把图标挤成两三行，所以按最小宽度自动分栏。 */
+  .side-feed { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
 }
 
 @media (max-width: 720px) {
@@ -244,15 +268,16 @@ h1 em { color: var(--coral-dark); font-style: italic; }
   .section-heading h2 { font-size: 30px; }
   .feed-meta { padding-top: 25px; white-space: nowrap; }
   .feature-card { display: block; }
-  .tool-image.large { min-height: 250px; max-height: 340px; }
+  .feature-card .tool-image { aspect-ratio: 1200 / 630; align-self: auto; }
   .feature-content { padding: 24px 20px 22px; }
   .feature-content h3 { margin-top: 22px; font-size: 28px; }
   .side-feed { grid-template-columns: 1fr; }
-  .tool-card { grid-template-columns: 116px 1fr; }
-  .tool-image { min-height: 230px; }
   .tool-card-content { padding: 16px 15px 15px; }
   .tool-card-content h3 { font-size: 19px; }
   .card-actions { gap: 5px; }
+  /* 窄屏上 margin-left:auto 会把打开链接顶到单独一行，和「找相似」拆开。
+     手机上让它跟着前面自然排就好。 */
+  .card-actions .open-link { margin-left: 0; }
   .explore-prompt { grid-template-columns: auto 1fr; padding: 20px; }
   .explore-prompt .quiet-button { grid-column: 2; justify-self: start; }
   .compare-dock { align-items: flex-start; gap: 12px; }
@@ -268,4 +293,11 @@ h1 em { color: var(--coral-dark); font-style: italic; }
   .detail-visual small { display: none; }
   .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .detail-actions .primary-button { width: 100%; margin-left: 0; }
+}
+
+/* 320~360px 的老款小屏手机：卡片只剩 288px，内容区仍要放得下一行 4 个 44px 图标
+   （4×44 + 3×5 = 191px）。卡片现在是上下结构，只需收紧内边距。 */
+@media (max-width: 360px) {
+  .tool-card-content { padding: 15px 14px 14px; }
+  .feature-content { padding: 20px 16px 18px; }
 }
